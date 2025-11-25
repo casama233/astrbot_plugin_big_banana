@@ -80,7 +80,7 @@ class Utils:
             return content, None
         except Timeout as e:
             logger.error(f"网络请求超时: {e}")
-            return None, "下载图片失败：网络请求超时，请检查网络连通性"
+            return None, "下载图片失败：请求超时"
         except Exception as e:
             logger.error(f"下载图片失败: {e}")
             return None, "下载图片失败"
@@ -193,7 +193,11 @@ class Utils:
                 logger.error(
                     f"图片生成失败，状态码: {response.status_code}, 响应内容: {response.text}"
                 )
-                return None, result.get("error", {}).get("message", "图片生成失败")
+                err_msg = result.get("error", {}).get("message", "图片生成失败")
+                return None, f"图片生成失败：{err_msg}"
+        except Timeout as e:
+            logger.error(f"网络请求超时: {e}")
+            return None, "图片生成失败：请求超时"
         except Exception as e:
             logger.error(f"请求错误: {e}")
             return None, "图片生成失败"
@@ -238,6 +242,9 @@ class Utils:
                     f"图片生成失败，状态码: {response.status_code}, 响应内容: {response.text}"
                 )
                 return None, result.get("error", {}).get("message", "图片生成失败")
+        except Timeout as e:
+            logger.error(f"网络请求超时: {e}")
+            return None, "图片生成失败：请求超时"
         except Exception as e:
             logger.error(f"请求错误: {e}")
             return None, "图片生成失败"
