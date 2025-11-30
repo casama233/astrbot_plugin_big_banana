@@ -177,20 +177,17 @@ class BigBanana(Star):
             return
 
         msg_type = ""
-        if cmd_type in ["用户", "user"]:
+        if cmd_type in ["用户", "user"] and target_id not in self.user_whitelist:
             msg_type = "用户"
-            if target_id in self.user_whitelist:
-                yield event.plain_result(f"⚠️ 用户 {target_id} 已在白名单中。")
-                return
             self.user_whitelist.append(target_id)
-        elif cmd_type in ["群组", "group"]:
+        elif cmd_type in ["群组", "group"] and target_id not in self.group_whitelist:
             msg_type = "群组"
-            if target_id in self.group_whitelist:
-                yield event.plain_result(f"⚠️ 群组 {target_id} 已在白名单中。")
-                return
             self.group_whitelist.append(target_id)
-        else:
+        elif cmd_type not in ["用户", "user", "群组", "group"]:
             yield event.plain_result("❌ 类型错误，请使用「用户」或「群组」。")
+            return
+        else:
+            yield event.plain_result(f"⚠️ {target_id} 已在名单列表中。")
             return
 
         yield event.plain_result(f"✅ 已添加{msg_type}白名单：{target_id}")
@@ -350,7 +347,7 @@ class BigBanana(Star):
             # 处理多触发词
             if cmd.startswith("[") and cmd.endswith("]"):
                 yield event.plain_result(
-                    "⚠️ 检测到该提示词为多触发词配置，请选择删除方案\nA 单独删除该触发词\nB 删除该多触发词\nC 取消操作"
+                    "⚠️ 检测到该提示词为多触发词配置，请选择删除方案\nA. 单独删除该触发词\nB. 删除该多触发词\nC. 取消操作"
                 )
 
                 # 删除多触发词时，进行二次确认
@@ -415,7 +412,7 @@ class BigBanana(Star):
                 except TimeoutError as _:
                     yield event.plain_result("超时了，操作已取消！")
                 except Exception as e:
-                    logger.error(f"debug waiter failed: {e}", exc_info=True)
+                    logger.error(f"大香蕉删除提示词出现错误: {e}", exc_info=True)
                     yield event.plain_result("处理时发生了一个内部错误。")
                 finally:
                     event.stop_event()
@@ -522,11 +519,14 @@ class BigBanana(Star):
             f"生成图片应用参数: { {k: v for k, v in params.items() if k != 'prompt'} }"
         )
 
-        # 处理图片
+        # 收集图片URL，后面统一处理
         image_urls = []
-        # 收集图片URL
+        # 小标记，用于优化At头像。当At对象是引用回复的发送者时，跳过一次。
+        skipped_at_qq = False
+        reply_sender_id = ""
         for comp in event.get_messages():
             if isinstance(comp, Comp.Reply) and comp.chain:
+                reply_sender_id = str(comp.sender_id)
                 for quote in comp.chain:
                     if isinstance(quote, Comp.Image):
                         image_urls.append(quote.url)
@@ -536,6 +536,10 @@ class BigBanana(Star):
                 and comp.qq
                 and event.platform_meta.name == "aiocqhttp"
             ):
+                # 如果At对象是引用回复的发送者，则跳过一次
+                if not skipped_at_qq and str(comp.qq) == reply_sender_id:
+                    skipped_at_qq = True
+                    continue
                 image_urls.append(
                     f"https://q4.qlogo.cn/headimg_dl?dst_uin={comp.qq}&spec=640"
                 )
@@ -595,15 +599,14 @@ class BigBanana(Star):
             )
             return
 
-        # 计算需要下载的图片数量
+        # 检查图片数量是否超过最大允许数量，不超过则可从url中下载图片
         append_count = max_allowed_images - len(image_b64_list)
-        if append_count > 0:
+        if append_count > 0 and image_urls:
             # 取前n张图片，下载并转换为Base64，追加到b64图片列表
             fetched = await self.utils.fetch_images(image_urls[:append_count])
             if fetched:
                 image_b64_list.extend(fetched)
 
-            # [FIX] 修复：只有在“必须有图(min>0)”且“最终没有图”时才报错
             # 如果 min_images 为 0，列表为空是允许的
             if not image_b64_list and min_required_images > 0:
                 yield event.chain_result(
@@ -613,7 +616,7 @@ class BigBanana(Star):
                     ]
                 )
                 return
-        else:
+        elif append_count <= 0 and image_urls:
             logger.warning(
                 f"参考图片数量超过或等于最大图片数量，将只使用前 {max_allowed_images} 张参考图片"
             )
@@ -637,15 +640,12 @@ class BigBanana(Star):
             random.shuffle(key_list)
 
             if not key_list:
-                logger.warning(
-                    f"提供商 {provider.get('name', 'unknown')} 未配置API Key，请先在插件配置中添加或者关闭此提供商",
-                )
+                warn_msg = f"提供商 {provider.get('name', 'unknown')} 未配置API Key，请先在插件配置中添加或者关闭此提供商"
+                logger.warning(warn_msg)
                 yield event.chain_result(
                     [
                         Comp.Reply(id=event.message_obj.message_id),
-                        Comp.Plain(
-                            f"❌ 提供商 {provider.get('name', 'unknown')} 未配置API Key，请先在插件配置中添加或者关闭此提供商"
-                        ),
+                        Comp.Plain(f"❌ {warn_msg}"),
                     ]
                 )
                 return
@@ -676,7 +676,7 @@ class BigBanana(Star):
                 ]
             )
             return
-        # 假设它支持返回多张图片...
+        # 假设它支持返回多张图片
         reply_result = []
         for _, b64 in image_result:
             reply_result.append(Comp.Image.fromBase64(b64))
