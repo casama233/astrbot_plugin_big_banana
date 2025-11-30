@@ -56,7 +56,7 @@ class Utils:
         self, url: str
     ) -> tuple[tuple[str, str] | None, str | None]:
         try:
-            response = await self.session.get(url)
+            response = await self.session.get(url, timeout=30)
             content = self._handle_image(response.content)
             return content, None
         except (
@@ -64,20 +64,26 @@ class Utils:
             requests.exceptions.CertificateVerifyError,
         ):
             # 关闭SSL验证
-            response = await self.session.get(url, verify=False)
+            response = await self.session.get(url, timeout=30, verify=False)
             content = self._handle_image(response.content)
             return content, None
         except Timeout as e:
-            logger.error(f"网络请求超时: {e}")
+            logger.error(f"网络请求超时: {url}\n{e}")
             return None, "下载图片失败：请求超时"
         except Exception as e:
-            logger.error(f"下载图片失败: {e}")
+            logger.error(f"下载图片失败: {url}\n{e}")
             return None, "下载图片失败"
 
     async def fetch_images(self, image_urls: list[str]) -> list[tuple[str, str]]:
         image_b64_list = []
         for url in image_urls:
-            content, error = await self._download_image(url)
+            content = None
+            error = None
+            # 增加重试逻辑
+            for _ in range(self.max_retry):
+                content, error = await self._download_image(url)
+                if not error and content is not None:
+                    break  # 成功就跳出循环
             if error or content is None:
                 continue
             image_b64_list.append(content)
@@ -133,7 +139,7 @@ class Utils:
             context["generationConfig"]["imageConfig"] = {"aspectRatio": aspect_ratio}
 
         # 以下参数仅 Gemini-3-Pro-Image-Preview 模型有效
-        if "gemini-3" in model:
+        if "gemini-3" in model or "Gemini-3" in model:
             # 处理工具类
             if params.get("google_search", self.google_search):
                 context["tools"] = [{"google_search": {}}]
@@ -142,6 +148,73 @@ class Utils:
             context["generationConfig"]["imageConfig"] = {"imageSize": image_size}
 
         return context
+
+    async def _call_gemini_stream_api(
+        self,
+        api_url: str,
+        api_key: str,
+        model: str,
+        prompt: str,
+        image_b64_list: list[tuple[str, str]],
+        params: dict,
+    ) -> tuple[list[tuple[str, str]] | None, str | None]:
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        }
+        url = f"{api_url}/{model}:streamGenerateContent?alt=sse"
+        # 构建请求上下文
+        gemini_context = self._build_gemini_context(
+            model, prompt, image_b64_list, params
+        )
+        try:
+            response = await self.session.post(
+                url, headers=headers, json=gemini_context, proxies=self.proxies
+            )
+            # 处理流式响应
+            streams = response.aiter_content(chunk_size=1024)
+            # 读取完整内容
+            data = b""
+            async for chunk in streams:
+                data += chunk
+                logger.debug(f"流式响应内容: {data.decode('utf-8')}")
+            result = data.decode("utf-8")
+            if response.status_code == 200:
+                b64_images = []
+                for line in result.splitlines():
+                    if line.startswith("data: "):
+                        line_data = line[len("data: ") :].strip()
+                        try:
+                            json_data = json.loads(line_data)
+                            # 遍历 json_data，检查是否有图片
+                            for item in json_data.get("candidates", []):
+                                parts = item.get("content", {}).get("parts", [])
+                                for part in parts:
+                                    if (
+                                        "inlineData" in part
+                                        and "data" in part["inlineData"]
+                                    ):
+                                        data = part["inlineData"]
+                                        b64_images.append(
+                                            (data["mimeType"], data["data"])
+                                        )
+                        except json.JSONDecodeError:
+                            continue
+                if not b64_images:
+                    logger.warning(f"请求成功，但未返回图片数据, 响应内容: {result}")
+                    return None, "响应中未包含图片数据"
+                return b64_images, None
+            else:
+                logger.error(
+                    f"图片生成失败，状态码: {response.status_code}, 响应内容: {result}"
+                )
+                return None, "响应中未包含图片数据"
+        except Timeout as e:
+            logger.error(f"网络请求超时: {e}")
+            return None, "图片生成失败：响应超时"
+        except Exception as e:
+            logger.error(f"请求错误: {e}")
+            return None, "图片生成失败：程序错误"
 
     async def _call_gemini_api(
         self,
@@ -157,6 +230,7 @@ class Utils:
             "x-goog-api-key": api_key,
         }
         url = f"{api_url}/{model}:generateContent"
+        # 构建请求上下文
         gemini_context = self._build_gemini_context(
             model, prompt, image_b64_list, params
         )
@@ -164,6 +238,7 @@ class Utils:
             response = await self.session.post(
                 url, headers=headers, json=gemini_context, proxies=self.proxies
             )
+            # 响应反序列化
             result = response.json()
             if response.status_code == 200:
                 b64_images = []
@@ -179,6 +254,7 @@ class Utils:
                     else:
                         logger.warning(f"图片生成失败, 响应内容: {response.text}")
                         return None, f"图片生成失败，原因: {finishReason}"
+                # 最后再检查是否有图片数据
                 if not b64_images:
                     logger.warning(
                         f"请求成功，但未返回图片数据, 响应内容: {response.text}"
@@ -203,8 +279,12 @@ class Utils:
             logger.error(f"请求错误: {e}")
             return None, "图片生成失败：程序错误"
 
-    def _build_openai_context(
-        self, model: str, prompt: str, image_b64_list: list[tuple[str, str]]
+    def _build_openai_chat_context(
+        self,
+        model: str,
+        prompt: str,
+        image_b64_list: list[tuple[str, str]],
+        stream: bool = False,
     ) -> dict:
         images_content = []
         for mime, b64 in image_b64_list:
@@ -219,11 +299,11 @@ class Utils:
                     "content": [{"type": "text", "text": prompt}, *images_content],
                 }
             ],
-            "stream": True,
+            "stream": stream,
         }
         return context
 
-    async def _call_openai_api(
+    async def _call_openai_stream_api(
         self,
         api_url: str,
         api_key: str,
@@ -236,7 +316,9 @@ class Utils:
             "Authorization": f"Bearer {api_key}",
         }
         # 构建请求上下文
-        openai_context = self._build_openai_context(model, prompt, image_b64_list)
+        openai_context = self._build_openai_chat_context(
+            model, prompt, image_b64_list, True
+        )
         try:
             # 发送请求
             response = await self.session.post(
@@ -255,6 +337,7 @@ class Utils:
                 logger.debug(f"流式响应内容: {data.decode('utf-8')}")
             result = data.decode("utf-8")
             if response.status_code == 200:
+                b64_images = []
                 images_url = []
                 for line in result.splitlines():
                     if line.startswith("data: "):
@@ -268,16 +351,23 @@ class Utils:
                                 content = item.get("delta", {}).get("content", "")
                                 match = re.search(r"!\[.*?\]\((.*?)\)", content)
                                 if match:
-                                    img_url = match.group(1)
-                                    images_url.append(img_url)
+                                    img_src = match.group(1)
+                                    if img_src.startswith("data:image/"):  # base64
+                                        header, base64_data = img_src.split(",", 1)
+                                        mime = header.split(";")[0].replace("data:", "")
+                                        b64_images.append((mime, base64_data))
+                                    else:  # URL
+                                        images_url.append(img_src)
                         except json.JSONDecodeError:
                             continue
-                if not images_url:
+                if not images_url and not b64_images:
                     logger.warning(f"请求成功，但未返回图片数据, 响应内容: {result}")
                     return None, "响应中未包含图片数据"
-                # 下载图片并转换为 base64
-                image_b64_list = await self.fetch_images(images_url)
-                return image_b64_list, None
+                # 下载图片并转换为 base64（有时会出现连接被重置的错误，不知道什么原因，海外机也一样）
+                b64_images += await self.fetch_images(images_url)
+                if not b64_images:
+                    return None, "图片下载失败"
+                return b64_images, None
             else:
                 logger.error(
                     f"图片生成失败，状态码: {response.status_code}, 响应内容: {result}"
@@ -290,9 +380,76 @@ class Utils:
             logger.error(f"请求错误: {e}")
             return None, "图片生成失败：程序错误"
 
+    async def _call_openai_api(
+        self,
+        api_url: str,
+        api_key: str,
+        model: str,
+        prompt: str,
+        image_b64_list: list[tuple[str, str]],
+    ):
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
+        # 构建请求上下文
+        openai_context = self._build_openai_chat_context(
+            model, prompt, image_b64_list, False
+        )
+        try:
+            # 发送请求
+            response = await self.session.post(
+                url=api_url, headers=headers, json=openai_context, proxies=self.proxies
+            )
+            # 响应反序列化
+            result = response.json()
+            if response.status_code == 200:
+                b64_images = []
+                images_url = []
+                for item in result.get("choices", []):
+                    # 检查 finish_reason 状态
+                    finish_reason = item.get("finish_reason", "")
+                    if finish_reason == "stop":
+                        content = item.get("message", {}).get("content", "")
+                        match = re.search(r"!\[.*?\]\((.*?)\)", content)
+                        if match:
+                            img_src = match.group(1)
+                            if img_src.startswith("data:image/"):  # base64
+                                header, base64_data = img_src.split(",", 1)
+                                mime = header.split(";")[0].replace("data:", "")
+                                b64_images.append((mime, base64_data))
+                            else:  # URL
+                                images_url.append(img_src)
+                    else:
+                        logger.warning(f"图片生成失败, 响应内容: {response.text}")
+                        return None, f"图片生成失败，原因: {finish_reason}"
+                # 最后再检查是否有图片数据
+                if not images_url and not b64_images:
+                    logger.warning(
+                        f"请求成功，但未返回图片数据, 响应内容: {response.text}"
+                    )
+                    return None, "响应中未包含图片数据"
+                # 下载图片并转换为 base64
+                b64_images += await self.fetch_images(images_url)
+                if not b64_images:
+                    return None, "图片下载失败"
+                return b64_images, None
+            else:
+                logger.error(
+                    f"图片生成失败，状态码: {response.status_code}, 响应内容: {response.text}"
+                )
+                return None, "响应中未包含图片数据"
+        except Timeout as e:
+            logger.error(f"网络请求超时: {e}")
+            return None, "图片生成失败：响应超时"
+        except Exception as e:
+            logger.error(f"请求错误: {e}")
+            return None, "图片生成失败：程序错误"
+
     async def generate_images(
         self,
         api_type: str,
+        stream: bool,
         api_url: str,
         model: str,
         api_key: str,
@@ -302,22 +459,41 @@ class Utils:
     ) -> tuple[list[tuple[str, str]] | None, str | None]:
         for _ in range(self.max_retry):
             if api_type == "Gemini":
-                image_b64, err = await self._call_gemini_api(
-                    api_url=api_url,
-                    model=model,
-                    api_key=api_key,
-                    prompt=prompt,
-                    image_b64_list=image_b64_list,
-                    params=params,
-                )
+                if stream:
+                    image_b64, err = await self._call_gemini_stream_api(
+                        api_url=api_url,
+                        model=model,
+                        api_key=api_key,
+                        prompt=prompt,
+                        image_b64_list=image_b64_list,
+                        params=params,
+                    )
+                else:
+                    image_b64, err = await self._call_gemini_api(
+                        api_url=api_url,
+                        model=model,
+                        api_key=api_key,
+                        prompt=prompt,
+                        image_b64_list=image_b64_list,
+                        params=params,
+                    )
             elif api_type == "OpenAI_Chat":
-                image_b64, err = await self._call_openai_api(
-                    api_url=api_url,
-                    model=model,
-                    api_key=api_key,
-                    prompt=prompt,
-                    image_b64_list=image_b64_list,
-                )
+                if stream:
+                    image_b64, err = await self._call_openai_stream_api(
+                        api_url=api_url,
+                        model=model,
+                        api_key=api_key,
+                        prompt=prompt,
+                        image_b64_list=image_b64_list,
+                    )
+                else:
+                    image_b64, err = await self._call_openai_api(
+                        api_url=api_url,
+                        model=model,
+                        api_key=api_key,
+                        prompt=prompt,
+                        image_b64_list=image_b64_list,
+                    )
             else:
                 logger.error(f"不支持的API类型: {api_type}")
                 return None, "❌ 不支持的API类型"

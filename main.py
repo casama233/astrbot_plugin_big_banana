@@ -10,6 +10,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.core import AstrBotConfig
+from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
 from .utils import Utils
 
@@ -30,9 +31,13 @@ class BigBanana(Star):
         self.conf = config
 
         # 白名单配置
-        whitelist_config = self.conf.get("whitelist_config", {})
-        self.group_whitelist_enabled = whitelist_config.get("enabled", False)
-        self.group_whitelist = whitelist_config.get("whitelist", [])
+        self.whitelist_config = self.conf.get("whitelist_config", {})
+        # 群组白名单，列表是引用类型
+        self.group_whitelist_enabled = self.whitelist_config.get("enabled", False)
+        self.group_whitelist = self.whitelist_config.get("whitelist", [])
+        # 用户白名单
+        self.user_whitelist_enabled = self.whitelist_config.get("user_enabled", False)
+        self.user_whitelist = self.whitelist_config.get("user_whitelist", [])
 
         # 前缀配置
         prefix_config = self.conf.get("prefix_config", {})
@@ -47,6 +52,9 @@ class BigBanana(Star):
             StarTools.get_data_dir("astrbot_plugin_big_banana") / "save_images"
         )
 
+        # 预设提示词列表
+        self.prompt_list = self.conf.get("prompt", [])
+
         # 图片保存
         self.save_image = self.conf.get("save_image", False)
 
@@ -60,9 +68,7 @@ class BigBanana(Star):
         retry_config = self.conf.get("retry_config", {})
         proxy = self.conf.get("proxy", "")
         self.utils = Utils(
-            retry_config=retry_config,
-            def_params=def_params,
-            proxy=proxy,
+            retry_config=retry_config, def_params=def_params, proxy=proxy
         )
 
     def parsing_prompt_params(self, prompt: str) -> tuple[list[str], dict]:
@@ -141,10 +147,278 @@ class BigBanana(Star):
 
         # 解析提示词配置
         self.prompt_dict = {}
-        for item in self.conf.get("prompt", []):
+        for item in self.prompt_list:
             cmd_list, params = self.parsing_prompt_params(item)
             for cmd in cmd_list:
                 self.prompt_dict[cmd] = params
+
+    # === 辅助功能：判断管理员，用于静默跳出 ===
+    def is_global_admin(self, event: AstrMessageEvent) -> bool:
+        """检查发送者是否为全局管理员"""
+        admin_ids = self.context.get_config().get("admins_id", [])
+        return event.get_sender_id() in admin_ids
+
+    # === 管理指令：白名单管理 ===
+    @filter.command("lm白名单添加", aliases=["lmawl"])
+    async def add_whitelist_command(
+        self, event: AstrMessageEvent, cmd_type: str, target_id: str
+    ):
+        """lm白名单添加 <用户/群组> <ID>"""
+        if not self.is_global_admin(event):
+            logger.info(
+                f"用户 {event.get_sender_id()} 试图执行管理员命令 lm白名单添加，权限不足"
+            )
+            return
+
+        if not cmd_type or not target_id:
+            yield event.plain_result(
+                "❌ 格式错误。\n用法：lm白名单添加 <用户/群组> <ID>"
+            )
+            return
+
+        msg_type = ""
+        if cmd_type in ["用户", "user"]:
+            msg_type = "用户"
+            if target_id in self.user_whitelist:
+                yield event.plain_result(f"⚠️ 用户 {target_id} 已在白名单中。")
+                return
+            self.user_whitelist.append(target_id)
+        elif cmd_type in ["群组", "group"]:
+            msg_type = "群组"
+            if target_id in self.group_whitelist:
+                yield event.plain_result(f"⚠️ 群组 {target_id} 已在白名单中。")
+                return
+            self.group_whitelist.append(target_id)
+        else:
+            yield event.plain_result("❌ 类型错误，请使用「用户」或「群组」。")
+            return
+
+        yield event.plain_result(f"✅ 已添加{msg_type}白名单：{target_id}")
+
+    @filter.command("lm白名单删除", aliases=["lmdwl"])
+    async def del_whitelist_command(
+        self, event: AstrMessageEvent, cmd_type: str, target_id: str
+    ):
+        """lm白名单删除 <用户/群组> <ID>"""
+        if not self.is_global_admin(event):
+            logger.info(
+                f"用户 {event.get_sender_id()} 试图执行管理员命令 lm白名单删除，权限不足"
+            )
+            return
+
+        if not cmd_type or not target_id:
+            yield event.plain_result(
+                "❌ 格式错误。\n用法：lm白名单删除 <用户/群组> <ID>"
+            )
+            return
+
+        if cmd_type in ["用户", "user"] and target_id in self.user_whitelist:
+            msg_type = "用户"
+            self.user_whitelist.remove(target_id)
+        elif cmd_type in ["群组", "group"] and target_id in self.group_whitelist:
+            msg_type = "群组"
+            self.group_whitelist.remove(target_id)
+        elif cmd_type not in ["用户", "user", "群组", "group"]:
+            yield event.plain_result("❌ 类型错误，请使用「用户」或「群组」。")
+            return
+        else:
+            yield event.plain_result(f"⚠️ {target_id} 不在名单列表中。")
+            return
+
+        yield event.plain_result(f"🗑️ 已删除{msg_type}白名单：{target_id}")
+
+    @filter.command("lm白名单列表", aliases=["lmwll"])
+    async def list_whitelist_command(self, event: AstrMessageEvent):
+        """lm白名单列表"""
+        if not self.is_global_admin(event):
+            logger.info(
+                f"用户 {event.get_sender_id()} 试图执行管理员命令 lm白名单列表，权限不足"
+            )
+            return
+
+        msg = f"""
+📋 白名单配置状态：
+=========
+🏢 群组限制：{"✅ 开启" if self.group_whitelist_enabled else "⬜ 关闭"}
+列表：{self.group_whitelist}
+=========
+👤 用户限制：{"✅ 开启" if self.user_whitelist_enabled else "⬜ 关闭"}
+列表：{self.user_whitelist}
+"""
+        yield event.plain_result(msg)
+
+    # === 管理指令：添加/更新提示词 ===
+    @filter.command("lm添加", aliases=["lma"])
+    async def add_prompt_command(
+        self, event: AstrMessageEvent, trigger_word: str, prompt_content: str
+    ):
+        """lm添加 <触发词> <提示词内容>"""
+        if not self.is_global_admin(event):
+            logger.info(
+                f"用户 {event.get_sender_id()} 试图执行管理员命令 lm添加，权限不足"
+            )
+            return
+
+        if not trigger_word or not prompt_content:
+            yield event.plain_result(
+                "❌ 格式错误。\n正确格式：lm添加 <触发词> <提示词内容>\n示例：lm添加 bnn3 beautiful girl --min_images 0"
+            )
+            return
+
+        build_prompt = f"{trigger_word} {prompt_content}"
+
+        action = "添加"
+        # 直接从字典中查重
+        if trigger_word in self.prompt_dict:
+            action = "更新"
+            # 从提示词列表中找出对应项进行更新
+            for i, v in enumerate(self.prompt_list):
+                cmd, _, prompt_str = v.strip().partition(" ")
+                if cmd == trigger_word:
+                    self.prompt_list[i] = build_prompt
+                    break
+                # 处理多触发词
+                if cmd.startswith("[") and cmd.endswith("]"):
+                    # 移除括号并按逗号分割
+                    cmd_list = cmd[1:-1].split(",")
+                    if trigger_word in cmd_list:
+                        # 将这个提示词从多触发提示词中移除
+                        cmd_list.remove(trigger_word)
+                        # 重新构建提示词字符串
+                        if len(cmd_list) == 1:
+                            # 仅剩一个触发词，改为单触发词形式
+                            new_config_item = f"{cmd_list[0]} {prompt_str}"
+                        else:
+                            new_cmd = "[" + ",".join(cmd_list) + "]"
+                            new_config_item = f"{new_cmd} {prompt_str}"
+                        self.prompt_list[i] = new_config_item
+                        # 最后为新的提示词添加一项
+                        self.prompt_list.append(build_prompt)
+                        break
+        # 新增提示词
+        else:
+            self.prompt_list.append(build_prompt)
+
+        # 字典具有唯一性，直接覆盖
+        cmd_list, params = self.parsing_prompt_params(build_prompt)
+        for cmd in cmd_list:
+            self.prompt_dict[cmd] = params
+
+        yield event.plain_result(f"✅ 已成功{action}提示词：「{trigger_word}」")
+
+    @filter.command("lm列表", aliases=["lml"])
+    async def list_prompts_command(self, event: AstrMessageEvent):
+        """lm列表"""
+        if not self.is_global_admin(event):
+            logger.info(
+                f"用户 {event.get_sender_id()} 试图执行管理员命令 lm列表，权限不足"
+            )
+            return
+
+        prompts = list(self.prompt_dict.keys())
+        if not prompts:
+            yield event.plain_result("当前没有预设提示词。")
+            return
+
+        msg = "📜 当前预设提示词列表：\n" + "、".join(prompts)
+        yield event.plain_result(msg)
+
+    @filter.command("lm删除", aliases=["lmd"])
+    async def del_prompt_command(self, event: AstrMessageEvent, trigger_word: str):
+        """lm删除 <触发词>"""
+        if not self.is_global_admin(event):
+            logger.info(
+                f"用户 {event.get_sender_id()} 试图执行管理员命令 lm删除，权限不足"
+            )
+            return
+
+        if not trigger_word:
+            yield event.plain_result("❌ 格式错误：lm删除 <触发词>")
+            return
+
+        if trigger_word not in self.prompt_dict:
+            yield event.plain_result(f"❌ 未找到提示词：「{trigger_word}」")
+            return
+
+        # 从提示词列表中找出对应项进行更新
+        for i, v in enumerate(self.prompt_list):
+            cmd, _, prompt_str = v.strip().partition(" ")
+            if cmd == trigger_word:
+                del self.prompt_list[i]
+                yield event.plain_result(f"🗑️ 已删除提示词：「{trigger_word}」")
+                return
+            # 处理多触发词
+            if cmd.startswith("[") and cmd.endswith("]"):
+                yield event.plain_result(
+                    "⚠️ 检测到该提示词为多触发词配置，请选择删除方案\nA 单独删除该触发词\nB 删除该多触发词\nC 取消操作"
+                )
+
+                # 删除多触发词时，进行二次确认
+                @session_waiter(timeout=30, record_history_chains=False)  # type: ignore
+                async def waiter(
+                    controller: SessionController, new_event: AstrMessageEvent
+                ):
+                    # 先鉴权
+                    if not self.is_global_admin(event):
+                        logger.info(
+                            f"用户 {event.get_sender_id()} 试图执行管理员命令 lm删除，权限不足"
+                        )
+                        return
+
+                    # 获取用户回复内容
+                    reply_content = new_event.message_str.strip().upper()
+                    if reply_content not in ["A", "B", "C"]:
+                        await new_event.send(
+                            event.plain_result("❌ 请输入有效的选项：A、B 或 C。")
+                        )
+                        return
+
+                    if reply_content == "C":
+                        await new_event.send(event.plain_result("❌ 操作已取消。"))
+                        controller.stop()
+                        return
+                    if reply_content == "B":
+                        # 删除整个多触发词配置
+                        del self.prompt_list[i]
+                        await new_event.send(
+                            event.plain_result(f"🗑️ 已删除多触发提示词：{cmd}")
+                        )
+                        controller.stop()
+                        return
+                    if reply_content == "A":
+                        # 将这个提示词从多触发提示词中移除
+                        # 移除括号并按逗号分割
+                        cmd_list = cmd[1:-1].split(",")
+                        if trigger_word in cmd_list:
+                            # 将这个提示词从多触发提示词中移除
+                            cmd_list.remove(trigger_word)
+                            # 重新构建提示词字符串
+                            if len(cmd_list) == 1:
+                                # 仅剩一个触发词，改为单触发词形式
+                                new_config_item = f"{cmd_list[0]} {prompt_str}"
+                            else:
+                                new_cmd = "[" + ",".join(cmd_list) + "]"
+                                new_config_item = f"{new_cmd} {prompt_str}"
+                            self.prompt_list[i] = new_config_item
+                            # 最后更新字典
+                            del self.prompt_dict[trigger_word]
+                            await new_event.send(
+                                event.plain_result(
+                                    f"🗑️ 已从多触发提示词中移除：「{trigger_word}」"
+                                )
+                            )
+                            controller.stop()
+                            return
+
+                try:
+                    await waiter(event)
+                except TimeoutError as _:
+                    yield event.plain_result("超时了，操作已取消！")
+                except Exception as e:
+                    logger.error(f"debug waiter failed: {e}", exc_info=True)
+                    yield event.plain_result("处理时发生了一个内部错误。")
+                finally:
+                    event.stop_event()
 
     @filter.event_message_type(filter.EventMessageType.ALL, priority=5)
     async def main(self, event: AstrMessageEvent):
@@ -186,12 +460,20 @@ class BigBanana(Star):
         if cmd not in self.prompt_dict:
             return
 
-        # 白名单判断
+        # 群白名单判断
         if (
             self.group_whitelist_enabled
             and event.unified_msg_origin not in self.group_whitelist
         ):
             logger.info(f"群 {event.unified_msg_origin} 不在白名单内，跳过处理")
+            return
+
+        # 用户白名单判断
+        if (
+            self.user_whitelist_enabled
+            and event.get_sender_id() not in self.user_whitelist
+        ):
+            logger.info(f"用户 {event.get_sender_id()} 不在白名单内，跳过处理")
             return
 
         # 检查API Key配置
@@ -214,16 +496,30 @@ class BigBanana(Star):
 
         # 获取提示词配置
         params = self.prompt_dict.get(cmd, {})
-        prompt = params.get("prompt", "anything")
+        # 先从预设提示词参数字典字典中取出提示词
+        prompt = params.get("prompt", "{{user_text}}")
 
-        # 处理占位提示词
-        if prompt == "anything":
-            # 解析message_str获取自定义提示词
-            _, params = self.parsing_prompt_params(message_str)
-            prompt = params.get("prompt", "anything")
+        # 检查预设提示词中是否包含动态参数占位符
+        # 注意：anything 占位符可能会被废弃
+        if "{{user_text}}" in prompt or prompt == "anything":
+            # 存在动态参数，解析用户消息
+            _, user_params = self.parsing_prompt_params(message_str)
+            # 将用户参数差分覆盖预设参数
+            params.update(user_params)
+            # 解析到用户的提示词和配置参数
+            user_prompt = user_params.get("prompt", "")
+            # 打算移除 anything 占位符，但是缺乏必要性，暂时保留
+            if prompt == "anything":
+                # logger.info(
+                #     "检测到预设提示词使用了即将废弃的占位符 anything，请尽快更新为 {{user_text}} 占位符"
+                # )
+                prompt = user_prompt
+            # 替换占位符，更新提示词
+            prompt = prompt.replace("{{user_text}}", user_prompt)
+
         logger.info(f"正在生成图片，提示词: {prompt[:60]}...")
         logger.debug(
-            f"生成图片应用参数: { {k: v for k, v in params.items() if k != 'secret_field'} }"
+            f"生成图片应用参数: { {k: v for k, v in params.items() if k != 'prompt'} }"
         )
 
         # 处理图片
@@ -235,7 +531,11 @@ class BigBanana(Star):
                     if isinstance(quote, Comp.Image):
                         image_urls.append(quote.url)
             # 处理At对象的QQ头像（对于艾特机器人的问题，还没有特别好的解决方案）
-            elif isinstance(comp, Comp.At) and comp.qq:
+            elif (
+                isinstance(comp, Comp.At)
+                and comp.qq
+                and event.platform_meta.name == "aiocqhttp"
+            ):
                 image_urls.append(
                     f"https://q4.qlogo.cn/headimg_dl?dst_uin={comp.qq}&spec=640"
                 )
@@ -319,14 +619,20 @@ class BigBanana(Star):
         err = None
         # 发起绘图请求
         for provider in self.provider_list:
+            # 读取提供商配置
             api_type = provider.get("api_type", "Gemini")
             api_url = provider.get(
                 "api_url",
                 "https://generativelanguage.googleapis.com/v1beta/models",
             )
             model = provider.get("model", "gemini-2.5-flash-image")
+            stream = provider.get("stream", False)
 
+            # 浅拷贝，确保线程安全
             key_list = provider.get("key", []).copy()
+            # 随机打乱Key顺序，避免每次都从第一个Key开始使用
+            random.shuffle(key_list)
+
             if not key_list:
                 logger.warning(
                     f"提供商 {provider.get('name', 'unknown')} 未配置API Key，请先在插件配置中添加或者关闭此提供商",
@@ -340,10 +646,11 @@ class BigBanana(Star):
                     ]
                 )
                 return
-            random.shuffle(key_list)
+
             for key in key_list:
                 image_result, err = await self.utils.generate_images(
                     api_type=api_type,
+                    stream=stream,
                     api_url=api_url,
                     model=model,
                     api_key=key,

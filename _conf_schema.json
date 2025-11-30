@@ -19,7 +19,7 @@
             },
             "api_type": {
                 "description": "接口规范",
-                "hint": "这个API接口使用的规范类型。当前仅支持Gemini规范。",
+                "hint": "这个API接口使用的规范类型。",
                 "type": "string",
                 "options": [
                     "Gemini",
@@ -43,6 +43,12 @@
                 "description": "模型",
                 "type": "string",
                 "default": "gemini-3-pro-image-preview",
+                "hint": ""
+            },
+            "stream": {
+                "description": "流式",
+                "type": "bool",
+                "default": false,
                 "hint": ""
             }
         }
@@ -92,6 +98,12 @@
                 "type": "string",
                 "default": "gemini-2.5-flash-image",
                 "hint": ""
+            },
+            "stream": {
+                "description": "流式",
+                "type": "bool",
+                "default": false,
+                "hint": ""
             }
         }
     },
@@ -99,11 +111,11 @@
         "description": "预设提示词",
         "type": "list",
         "default": [
-            "bnn anything --min_images 1",
-            "bnnt anything --min_images 0",
+            "bnn {{user_text}} --min_images 1",
+            "bnnt {{user_text}} --min_images 0",
             "手办化 Create a premium, collectible 1/7 scale standalone figurine based on the image, meticulously replicating the character, made from smooth PVC and ABS plastic with a professional matte finish. It stands on a minimalist transparent acrylic base. Next to it is its retail packaging box displaying the price and brand information, with the figure wrapped in plastic inside the slightly larger box. They are naturally arranged on a clean wooden table surrounded by reference books, with a bookshelf in the background and soft afternoon sunlight streaming through the window. Photo-realistic, DSLR effect, depth of field, bokeh background."
         ],
-        "hint": "格式1: 触发词 提示词 --参数1 参数值1 --参数2 参数值2。格式2: [触发词1,触发词2] 提示词 --参数1 参数值1 --参数2 参数值2。触发词和触发词列表不能有空格。若省略参数值，则视为布尔值true，布尔值务必用小写。占位提示词：anything，占位提示词会被消息内容覆盖，用于自定义提示词。可选的参数请参考「提示词默认参数」。"
+        "hint": "格式1: 触发词 提示词 --参数1 参数值1 --参数2 参数值2。格式2: [触发词1,触发词2] 提示词 --参数1 参数值1 --参数2 参数值2。触发词和触发词列表不能有空格。若省略参数值，则视为布尔值true，布尔值务必用小写。占位提示词：{{user_text}}，占位提示词会被消息内容覆盖，用于自定义提示词，可以在占位提示词前后添加固定的预设提示词。可选的参数请参考「提示词默认参数」。触发词冲突可能会相互覆盖。"
     },
     "def_params": {
         "description": "提示词默认参数",
@@ -150,13 +162,13 @@
                     "4K"
                 ],
                 "default": "1K",
-                "hint": "生成图片的分辨率，必须是大写的K。当前仅对 gemini-3-pro-image-preview 模型有效"
+                "hint": "生成图片的分辨率，必须是大写的K。当前仅对 gemini-3 模型有效"
             },
             "google_search": {
                 "description": "是否启用谷歌搜索工具",
                 "type": "bool",
                 "default": true,
-                "hint": "允许模型使用谷歌搜索工具获取实时信息。当前仅对 gemini-3-pro-image-preview 模型有效"
+                "hint": "允许模型使用谷歌搜索工具获取实时信息。当前仅对 gemini-3 模型有效"
             },
             "text_response": {
                 "description": "启用文本响应",
@@ -192,7 +204,7 @@
         }
     },
     "retry_config": {
-        "description": "网络配置",
+        "description": "网络和重试",
         "type": "object",
         "hint": "",
         "items": {
@@ -207,6 +219,12 @@
                 "type": "int",
                 "default": 300,
                 "hint": "单位：秒，对所有请求有效。每次重试独立计算超时时间。"
+            },
+            "proxy": {
+                "description": "HTTP代理",
+                "type": "string",
+                "default": "",
+                "hint": "格式可能是 http://127.0.0.1:7890，仅对大模型请求生效。"
             }
         }
     },
@@ -215,12 +233,6 @@
         "type": "bool",
         "default": false,
         "hint": "生成的图片保存到插件数据目录的 save_images 文件夹"
-    },
-    "proxy": {
-        "description": "HTTP代理",
-        "type": "string",
-        "default": "",
-        "hint": "格式可能是 http://127.0.0.1:7890，仅对大模型请求生效。"
     },
     "whitelist_config": {
         "description": "白名单配置",
@@ -237,7 +249,19 @@
                 "description": "群组SID白名单",
                 "type": "list",
                 "default": [],
-                "hint": "白名单群组SID列表，可在对应群内使用/sid获取。"
+                "hint": "白名单群组SID列表，可在对应群内使用/sid获取"
+            },
+            "user_enabled": {
+                "description": "启用用户白名单",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后，只有在白名单内的用户可以使用"
+            },
+            "user_whitelist": {
+                "description": "用户ID白名单",
+                "type": "list",
+                "default": [],
+                "hint": "用户QQ号列表"
             }
         }
     }
