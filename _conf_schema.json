@@ -131,7 +131,7 @@
             "max_images": {
                 "description": "最大输入图片数量",
                 "type": "int",
-                "default": 5,
+                "default": 6,
                 "hint": "消息中携带的图片数量超过这个值n，只取前n张图片。Gemini API文档写了Gemini3最大支持14张图片输入，但是最佳实践是3张。"
             },
             "aspect_ratio": {
@@ -162,13 +162,13 @@
                     "4K"
                 ],
                 "default": "1K",
-                "hint": "生成图片的分辨率，必须是大写的K。当前仅对 gemini-3 模型有效"
+                "hint": "生成图片的分辨率，必须是大写的K。当前仅对Gemini规范的 gemini-3 模型有效"
             },
             "google_search": {
                 "description": "是否启用谷歌搜索工具",
                 "type": "bool",
                 "default": true,
-                "hint": "允许模型使用谷歌搜索工具获取实时信息。当前仅对 gemini-3 模型有效"
+                "hint": "允许模型使用谷歌搜索工具获取实时信息。当前仅对Gemini规范的 gemini-3 模型有效"
             },
             "text_response": {
                 "description": "启用文本响应",

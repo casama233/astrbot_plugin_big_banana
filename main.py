@@ -246,9 +246,7 @@ class BigBanana(Star):
 
     # === 管理指令：添加/更新提示词 ===
     @filter.command("lm添加", aliases=["lma"])
-    async def add_prompt_command(
-        self, event: AstrMessageEvent, trigger_word: str, prompt_content: str
-    ):
+    async def add_prompt_command(self, event: AstrMessageEvent, trigger_word: str):
         """lm添加 <触发词> <提示词内容>"""
         if not self.is_global_admin(event):
             logger.info(
@@ -256,52 +254,87 @@ class BigBanana(Star):
             )
             return
 
-        if not trigger_word or not prompt_content:
-            yield event.plain_result(
-                "❌ 格式错误。\n正确格式：lm添加 <触发词> <提示词内容>\n示例：lm添加 bnn3 beautiful girl --min_images 0"
-            )
+        if not trigger_word:
+            yield event.plain_result("❌ 格式错误：lm添加 <触发词>")
             return
 
-        build_prompt = f"{trigger_word} {prompt_content}"
+        yield event.plain_result(
+            f"正在为触发词 「{trigger_word}」 添加/更新提示词，请在60秒内输入完整的提示词内容（包括参数）。输入「取消」可取消操作。"
+        )
 
-        action = "添加"
-        # 直接从字典中查重
-        if trigger_word in self.prompt_dict:
-            action = "更新"
-            # 从提示词列表中找出对应项进行更新
-            for i, v in enumerate(self.prompt_list):
-                cmd, _, prompt_str = v.strip().partition(" ")
-                if cmd == trigger_word:
-                    self.prompt_list[i] = build_prompt
-                    break
-                # 处理多触发词
-                if cmd.startswith("[") and cmd.endswith("]"):
-                    # 移除括号并按逗号分割
-                    cmd_list = cmd[1:-1].split(",")
-                    if trigger_word in cmd_list:
-                        # 将这个提示词从多触发提示词中移除
-                        cmd_list.remove(trigger_word)
-                        # 重新构建提示词字符串
-                        if len(cmd_list) == 1:
-                            # 仅剩一个触发词，改为单触发词形式
-                            new_config_item = f"{cmd_list[0]} {prompt_str}"
-                        else:
-                            new_cmd = "[" + ",".join(cmd_list) + "]"
-                            new_config_item = f"{new_cmd} {prompt_str}"
-                        self.prompt_list[i] = new_config_item
-                        # 最后为新的提示词添加一项
-                        self.prompt_list.append(build_prompt)
+        # 记录操作员账号
+        operator_id = event.get_sender_id()
+
+        @session_waiter(timeout=60, record_history_chains=False)  # type: ignore
+        async def waiter(controller: SessionController, event: AstrMessageEvent):
+            # 先鉴权
+            if not self.is_global_admin(event):
+                logger.info(
+                    f"用户 {event.get_sender_id()} 试图执行管理员命令 lm添加，权限不足"
+                )
+                return
+            # 再判断消息来源是否是同一用户
+            if event.get_sender_id() != operator_id:
+                return
+
+            if event.message_str.strip() == "取消":
+                await event.send(event.plain_result("🍌 操作已取消。"))
+                controller.stop()
+                return
+
+            build_prompt = f"{trigger_word} {event.message_str.strip()}"
+
+            action = "添加"
+            # 直接从字典中查重
+            if trigger_word in self.prompt_dict:
+                action = "更新"
+                # 从提示词列表中找出对应项进行更新
+                for i, v in enumerate(self.prompt_list):
+                    cmd, _, prompt_str = v.strip().partition(" ")
+                    if cmd == trigger_word:
+                        self.prompt_list[i] = build_prompt
                         break
-        # 新增提示词
-        else:
-            self.prompt_list.append(build_prompt)
+                    # 处理多触发词
+                    if cmd.startswith("[") and cmd.endswith("]"):
+                        # 移除括号并按逗号分割
+                        cmd_list = cmd[1:-1].split(",")
+                        if trigger_word in cmd_list:
+                            # 将这个提示词从多触发提示词中移除
+                            cmd_list.remove(trigger_word)
+                            # 重新构建提示词字符串
+                            if len(cmd_list) == 1:
+                                # 仅剩一个触发词，改为单触发词形式
+                                new_config_item = f"{cmd_list[0]} {prompt_str}"
+                            else:
+                                new_cmd = "[" + ",".join(cmd_list) + "]"
+                                new_config_item = f"{new_cmd} {prompt_str}"
+                            self.prompt_list[i] = new_config_item
+                            # 最后为新的提示词添加一项
+                            self.prompt_list.append(build_prompt)
+                            break
+            # 新增提示词
+            else:
+                self.prompt_list.append(build_prompt)
 
-        # 字典具有唯一性，直接覆盖
-        cmd_list, params = self.parsing_prompt_params(build_prompt)
-        for cmd in cmd_list:
-            self.prompt_dict[cmd] = params
+            # 字典具有唯一性，直接覆盖
+            cmd_list, params = self.parsing_prompt_params(build_prompt)
+            for cmd in cmd_list:
+                self.prompt_dict[cmd] = params
 
-        yield event.plain_result(f"✅ 已成功{action}提示词：「{trigger_word}」")
+            await event.send(
+                event.plain_result(f"✅ 已成功{action}提示词：「{trigger_word}」")
+            )
+            controller.stop()
+
+        try:
+            await waiter(event)
+        except TimeoutError as _:
+            yield event.plain_result("❌ 超时了，操作已取消！")
+        except Exception as e:
+            logger.error(f"大香蕉添加提示词出现错误: {e}", exc_info=True)
+            yield event.plain_result("❌ 处理时发生了一个内部错误。")
+        finally:
+            event.stop_event()
 
     @filter.command("lm列表", aliases=["lml"])
     async def list_prompts_command(self, event: AstrMessageEvent):
@@ -353,7 +386,7 @@ class BigBanana(Star):
                 # 删除多触发词时，进行二次确认
                 @session_waiter(timeout=30, record_history_chains=False)  # type: ignore
                 async def waiter(
-                    controller: SessionController, new_event: AstrMessageEvent
+                    controller: SessionController, event: AstrMessageEvent
                 ):
                     # 先鉴权
                     if not self.is_global_admin(event):
@@ -363,21 +396,21 @@ class BigBanana(Star):
                         return
 
                     # 获取用户回复内容
-                    reply_content = new_event.message_str.strip().upper()
+                    reply_content = event.message_str.strip().upper()
                     if reply_content not in ["A", "B", "C"]:
-                        await new_event.send(
+                        await event.send(
                             event.plain_result("❌ 请输入有效的选项：A、B 或 C。")
                         )
                         return
 
                     if reply_content == "C":
-                        await new_event.send(event.plain_result("❌ 操作已取消。"))
+                        await event.send(event.plain_result("🍌 操作已取消。"))
                         controller.stop()
                         return
                     if reply_content == "B":
                         # 删除整个多触发词配置
                         del self.prompt_list[i]
-                        await new_event.send(
+                        await event.send(
                             event.plain_result(f"🗑️ 已删除多触发提示词：{cmd}")
                         )
                         controller.stop()
@@ -399,7 +432,7 @@ class BigBanana(Star):
                             self.prompt_list[i] = new_config_item
                             # 最后更新字典
                             del self.prompt_dict[trigger_word]
-                            await new_event.send(
+                            await event.send(
                                 event.plain_result(
                                     f"🗑️ 已从多触发提示词中移除：「{trigger_word}」"
                                 )
@@ -478,7 +511,7 @@ class BigBanana(Star):
             yield event.chain_result(
                 [
                     Comp.Reply(id=event.message_obj.message_id),
-                    Comp.Plain("暂无可用模型提供商，请先在插件配置中启用"),
+                    Comp.Plain("🍌 暂无可用模型提供商，请先在插件配置中启用"),
                 ]
             )
             return
@@ -593,7 +626,7 @@ class BigBanana(Star):
                 [
                     Comp.Reply(id=event.message_obj.message_id),
                     Comp.Plain(
-                        f"❌ 图片数量不足，最少需要 {min_required_images} 张图片，当前仅 {len(image_urls) + len(image_b64_list)} 张"
+                        f"🍌 图片数量不足，最少需要 {min_required_images} 张图片，当前仅 {len(image_urls) + len(image_b64_list)} 张"
                     ),
                 ]
             )
@@ -616,7 +649,8 @@ class BigBanana(Star):
                     ]
                 )
                 return
-        elif append_count <= 0 and image_urls:
+
+        if len(image_b64_list) + len(image_urls) > max_allowed_images:
             logger.warning(
                 f"参考图片数量超过或等于最大图片数量，将只使用前 {max_allowed_images} 张参考图片"
             )
