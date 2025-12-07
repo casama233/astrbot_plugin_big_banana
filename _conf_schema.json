@@ -37,13 +37,13 @@
                 "description": "api_url",
                 "type": "string",
                 "default": "https://generativelanguage.googleapis.com/v1beta/models",
-                "hint": ""
+                "hint": "Gemini填写示例：https://generativelanguage.googleapis.com/v1beta/models，OpenAI填写示例：https://api.openai.com/v1/chat/completions"
             },
             "model": {
                 "description": "模型",
                 "type": "string",
                 "default": "gemini-3-pro-image-preview",
-                "hint": ""
+                "hint": "默认值 gemini-3-pro-image-preview"
             },
             "stream": {
                 "description": "流式",
@@ -91,13 +91,13 @@
                 "description": "api_url",
                 "type": "string",
                 "default": "https://generativelanguage.googleapis.com/v1beta/models",
-                "hint": ""
+                "hint": "Gemini示例：https://generativelanguage.googleapis.com/v1beta/models，OpenAI示例：http://api.openai.com/v1/chat/completions"
             },
             "model": {
                 "description": "模型",
                 "type": "string",
-                "default": "gemini-2.5-flash-image",
-                "hint": ""
+                "default": "gemini-3-pro-image-preview",
+                "hint": "默认值 gemini-3-pro-image-preview"
             },
             "stream": {
                 "description": "流式",
@@ -193,7 +193,7 @@
                 "description": "混合模式",
                 "type": "bool",
                 "default": false,
-                "hint": "启用后，无命令前缀与带命令前缀皆可触发画图功能。无特殊需求不需要开启。"
+                "hint": "启用后，无命令前缀与带命令前缀皆可触发生成图片功能。无特殊需求不需要开启。"
             },
             "prefix_list": {
                 "description": "命令前缀",
@@ -212,13 +212,13 @@
                 "description": "最大重试次数",
                 "type": "int",
                 "default": 2,
-                "hint": "每个Key的最大重试次数"
+                "hint": "每个Key的最大重试次数，不计算每个Key的首次请求"
             },
             "timeout": {
                 "description": "超时",
                 "type": "int",
                 "default": 300,
-                "hint": "单位：秒，对所有请求有效。每次重试独立计算超时时间。"
+                "hint": "单位：秒，仅对模型请求有效。每次重试独立计算超时时间。"
             },
             "proxy": {
                 "description": "HTTP代理",
