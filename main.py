@@ -533,10 +533,17 @@ class BigBanana(Star):
             ):
                 qq = str(comp.qq)
                 self_id = event.get_self_id()
+                logger.info(
+                    f"{skipped_at_qq}, {qq}, {reply_sender_id}, {self_id}, {event.is_at_or_wake_command}, {is_llm_tool}"
+                )
                 # 如果At对象是被引用消息的发送者，跳过一次
                 if not skipped_at_qq and (
-                    (qq == reply_sender_id and self.skip_at_first)
-                    or (qq == self_id and self.skip_quote_first)
+                    (qq == reply_sender_id and self.skip_quote_first)
+                    or (
+                        qq == self_id
+                        and event.is_at_or_wake_command
+                        and self.skip_at_first
+                    )
                     or (qq == self_id and self.skip_llm_at_first and is_llm_tool)
                 ):
                     skipped_at_qq = True
@@ -685,6 +692,9 @@ class BigBanana(Star):
         """绘图命令消息入口"""
 
         message_str = event.message_str
+        # 跳过空消息
+        if not message_str:
+            return
 
         # 先处理前缀
         matched_prefix = False

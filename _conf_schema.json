@@ -237,19 +237,19 @@
                 "description": "跳过第一次@机器人",
                 "type": "bool",
                 "default": false,
-                "hint": "开启后@机器人生成图片时，跳过一次机器人的头像。"
+                "hint": "通过@唤醒机器人时，跳过一次机器人的头像。"
             },
             "skip_quote_first": {
                 "description": "跳过第一次@引用",
                 "type": "bool",
                 "default": true,
-                "hint": "如果At对象是被引用消息的发送者，跳过一次At对象的头像。"
+                "hint": "如果@对象是被引用消息的发送者，跳过一次@对象的头像。"
             },
             "skip_llm_at_first": {
-                "description": "跳过LLM第一次@机器人",
+                "description": "LLM跳过第一次@机器人",
                 "type": "bool",
                 "default": true,
-                "hint": "如果At机器人的时候同时触发了LLM函数调用工具，跳过一次机器人的头像。"
+                "hint": "通过@机器人触发LLM函数调用工具，跳过一次机器人的头像。"
             }
         }
     },

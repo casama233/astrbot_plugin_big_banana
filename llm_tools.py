@@ -35,8 +35,9 @@ calls until the image is generated.
                 "prompt": {
                     "type": "string",
                     "description": """The image generation prompt. Refine the image
-generation prompt to ensure it is clear, detailed, and accurately aligned with
-the user's intent.""",
+generation prompt to ensure it is clear, detailed, and accurately aligned with the user's
+intent. Before refining, you must first determine whether the user may be requesting a
+preset prompt. If so, retrieve the preset prompt and modify it accordingly.""",
                 },
                 "preset_name": {
                     "type": "string",
@@ -59,8 +60,7 @@ expressed by the user may be preset names""",
                 },
                 "get_preset_name_list": {
                     "type": "boolean",
-                    "description": """If the user specifies a particular style, or if you
-                        believe the user's reference to a preset name is not accurate,
+                    "description": """If the preset name provided by the user is inaccurate,
                         you may set this option to true. The tool will then return a list
                         of all preset names, allowing you to accurately fill the correct
                         preset into the preset_name parameter.""",
@@ -76,7 +76,7 @@ expressed by the user may be preset names""",
         **kwargs,
     ) -> ToolExecResult:
         if self.instance is None:
-            logger.warning("BigBananaTool 插件未初始化完成，无法处理请求")
+            logger.warning("BigBanana 插件未初始化完成，无法处理请求")
             return "插件未初始化完成，请稍后再试。"
         astr_agent_ctx = context.context  # type: ignore
         event: AstrMessageEvent = astr_agent_ctx.event
@@ -126,6 +126,8 @@ expressed by the user may be preset names""",
                 return f"未找到预设提示词：「{preset_name}」。请重新询问用户获取正确的预设名称，或者将「get_preset_name_list」参数设置为true，以获取完整的预设提示词名称列表。若不需要使用预设提示词，请将「preset_name」参数留空。"
             params = self.instance.prompt_dict.get(preset_name, {})
             preset_prompt = params.get("prompt", "{{user_text}}")
+            if preset_prompt == "{{user_text}}":
+                return "该提示词属于自定义提示词，由用户提供文本生成图片。"
             return preset_prompt
 
         if not prompt:
@@ -153,4 +155,4 @@ def remove_tools(context: Context):
     tool = func_tool.get_func("banana_image_generation")
     if tool:
         StarTools.unregister_llm_tool("banana_image_generation")
-        logger.info("已移除 BigBananaTool 工具注册")
+        logger.info("已移除 banana_image_generation 工具注册")
