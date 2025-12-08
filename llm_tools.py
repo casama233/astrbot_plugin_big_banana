@@ -4,6 +4,7 @@ from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 from astrbot.api import logger
+from astrbot.api.star import Context, StarTools
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
@@ -43,7 +44,8 @@ the user's intent.""",
 on a preset prompt, you must retrieve the name of that preset prompt and
 assign it to this parameter. If your prompt is a modification based on a preset prompt,
 this field must retain the original preset name so the tool can retrieve
-the correct generation parameters.""",
+the correct generation parameters. You must be aware that the drawing style instructions
+expressed by the user may be preset names""",
                 },
                 "get_preset": {
                     "type": "boolean",
@@ -57,10 +59,11 @@ the correct generation parameters.""",
                 },
                 "get_preset_name_list": {
                     "type": "boolean",
-                    "description": """If you believe the user has referred to the preset name
-                        incorrectly, you may set this option to true. The tool will return a
-                        list of all available preset names, allowing you to infer what
-                        the user actually intended.""",
+                    "description": """If the user specifies a particular style, or if you
+                        believe the user's reference to a preset name is not accurate,
+                        you may set this option to true. The tool will then return a list
+                        of all preset names, allowing you to accurately fill the correct
+                        preset into the preset_name parameter.""",
                 },
             },
             "required": [],
@@ -83,6 +86,14 @@ the correct generation parameters.""",
         preset_name = kwargs.get("preset_name", "")
         get_preset = kwargs.get("get_preset", False)
         get_preset_name_list = kwargs.get("get_preset_name_list", False)
+        logger.debug(
+            {
+                "prompt": prompt[:30],
+                "preset_name": preset_name,
+                "get_preset": get_preset,
+                "get_preset_name_list": get_preset_name_list,
+            }
+        )
 
         # 群白名单判断
         if (
@@ -112,7 +123,7 @@ the correct generation parameters.""",
         if get_preset:
             if preset_name not in self.instance.prompt_dict:
                 logger.warning(f"未找到预设提示词：「{preset_name}」")
-                return f"未找到预设提示词：「{preset_name}」，重新询问用户获取正确的预设名称。"
+                return f"未找到预设提示词：「{preset_name}」。请重新询问用户获取正确的预设名称，或者将「get_preset_name_list」参数设置为true，以获取完整的预设提示词名称列表。若不需要使用预设提示词，请将「preset_name」参数留空。"
             params = self.instance.prompt_dict.get(preset_name, {})
             preset_prompt = params.get("prompt", "{{user_text}}")
             return preset_prompt
@@ -130,6 +141,16 @@ the correct generation parameters.""",
                 preset_prompt = params.get("prompt", "{{user_text}}")
 
         logger.info(f"生成图片提示词: {prompt}")
-        msg_chain = await self.instance._dispatch_generate_image(event, params, prompt)
+        msg_chain = await self.instance._dispatch_generate_image(
+            event, params, prompt, is_llm_tool=True
+        )
         # 直接返回消息链好像发不出图片啊
         return event.chain_result(msg_chain)
+
+
+def remove_tools(context: Context):
+    func_tool = context.get_llm_tool_manager()
+    tool = func_tool.get_func("banana_image_generation")
+    if tool:
+        StarTools.unregister_llm_tool("banana_image_generation")
+        logger.info("已移除 BigBananaTool 工具注册")

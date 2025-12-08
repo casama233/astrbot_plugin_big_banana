@@ -231,19 +231,25 @@
     "preference_settings": {
         "description": "偏好设置",
         "type": "object",
-        "hint": "以下配置因个人使用需求而异，暂无两全之策",
+        "hint": "以下配置因个人使用需求而异，暂无两全之策。跳过At头像的三个选项共用一个计数。",
         "items": {
             "skip_at_first": {
                 "description": "跳过第一次@机器人",
                 "type": "bool",
                 "default": false,
-                "hint": "开启后@机器人生成图片时，跳过一次机器人的头像。skip_quote_first 与本项共用跳过计数。"
+                "hint": "开启后@机器人生成图片时，跳过一次机器人的头像。"
             },
             "skip_quote_first": {
                 "description": "跳过第一次@引用",
                 "type": "bool",
                 "default": true,
-                "hint": "如果At对象是被引用消息的发送者，跳过一次At对象的头像。skip_at_first 与本性共用跳过计数。"
+                "hint": "如果At对象是被引用消息的发送者，跳过一次At对象的头像。"
+            },
+            "skip_llm_at_first": {
+                "description": "跳过LLM第一次@机器人",
+                "type": "bool",
+                "default": true,
+                "hint": "如果At机器人的时候同时触发了LLM函数调用工具，跳过一次机器人的头像。"
             }
         }
     },

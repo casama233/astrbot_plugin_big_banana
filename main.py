@@ -12,7 +12,7 @@ from astrbot.api.star import Context, Star, StarTools
 from astrbot.core import AstrBotConfig
 from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
-from .llm_tools import BigBananaTool
+from .llm_tools import BigBananaTool, remove_tools
 from .utils import Utils
 
 PARAMS_LIST = [
@@ -69,6 +69,7 @@ class BigBanana(Star):
         preference_settings = self.conf.get("preference_settings", {})
         self.skip_at_first = preference_settings.get("skip_at_first", False)
         self.skip_quote_first = preference_settings.get("skip_quote_first", True)
+        self.skip_llm_at_first = preference_settings.get("skip_llm_at_first", True)
 
         # 初始化工具类
         retry_config = self.conf.get("retry_config", {})
@@ -506,7 +507,11 @@ class BigBanana(Star):
             yield event.plain_result(f"❌ 未找到提示词：「{trigger_word}」")
 
     async def _dispatch_generate_image(
-        self, event: AstrMessageEvent, params: dict, prompt: str
+        self,
+        event: AstrMessageEvent,
+        params: dict,
+        prompt: str,
+        is_llm_tool: bool = False,
     ):
         """负责参数处理、调度提供商、密钥轮询等逻辑"""
         # 收集图片URL，后面统一处理
@@ -526,10 +531,13 @@ class BigBanana(Star):
                 and comp.qq
                 and event.platform_meta.name == "aiocqhttp"
             ):
+                qq = str(comp.qq)
+                self_id = event.get_self_id()
                 # 如果At对象是被引用消息的发送者，跳过一次
                 if not skipped_at_qq and (
-                    (str(comp.qq) == reply_sender_id and self.skip_at_first)
-                    or (str(comp.qq) == event.get_self_id() and self.skip_quote_first)
+                    (qq == reply_sender_id and self.skip_at_first)
+                    or (qq == self_id and self.skip_quote_first)
+                    or (qq == self_id and self.skip_llm_at_first and is_llm_tool)
                 ):
                     skipped_at_qq = True
                     continue
@@ -539,23 +547,14 @@ class BigBanana(Star):
 
         min_required_images = params.get("min_images", self.min_images)
         max_allowed_images = params.get("max_images", self.max_images)
-        # 如果图片数量不满足最小要求，且消息平台是Aiocqhttp，取QQ头像作为参考图片
+        # 如果图片数量不满足最小要求，且消息平台是Aiocqhttp，取消息发送者头像作为参考图片
         if (
             len(image_urls) < min_required_images
             and event.platform_meta.name == "aiocqhttp"
         ):
-            # 优先取At对象头像
-            for comp in event.get_messages():
-                if isinstance(comp, Comp.At) and comp.qq:
-                    image_urls.append(f"https://q.qlogo.cn/g?b=qq&s=0&nk={comp.qq}")
-                if len(image_urls) >= min_required_images:
-                    break
-
-            # 如果图片数量仍然不足，取消息发送者头像
-            if len(image_urls) < min_required_images:
-                image_urls.append(
-                    f"https://q.qlogo.cn/g?b=qq&s=0&nk={event.get_sender_id()}"
-                )
+            image_urls.append(
+                f"https://q.qlogo.cn/g?b=qq&s=0&nk={event.get_sender_id()}"
+            )
 
         # 图片b64列表，每个元素是 (mime_type, b64_data) 元组
         image_b64_list = []
@@ -761,3 +760,4 @@ class BigBanana(Star):
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
         await self.utils.close()
+        remove_tools(self.context)
