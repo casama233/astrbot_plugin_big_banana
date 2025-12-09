@@ -3,11 +3,14 @@ from typing import Any
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
+import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.star import Context, StarTools
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
+from astrbot.core.message.components import BaseMessageComponent
+from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 
 
@@ -26,44 +29,42 @@ there is no need to explicitly provide an image. The tool will automatically fet
 the corresponding user avatar as a reference. But you must first ensure that the message
 has @-mentioned the target user, or that it is using the sender's own avatar.
 After getting the preset prompt, you need to perform multiple rounds of tool function
-calls until the image is generated.
-"""  # 工具描述
+calls until the image is generated. You must explicitly call the tool to generate an image,
+rather than only producing textual output. Make decisions on your own, and do not ask
+the user unless it is necessary."""  # 工具描述
     parameters: dict = Field(
         default_factory=lambda: {
             "type": "object",
             "properties": {
                 "prompt": {
                     "type": "string",
-                    "description": """The image generation prompt. Refine the image
-generation prompt to ensure it is clear, detailed, and accurately aligned with the user's
-intent. Before refining, you must first determine whether the user may be requesting a
-preset prompt. If so, retrieve the preset prompt and modify it accordingly.""",
+                    "description": """The image generation prompt. Refine the image generation
+prompt to ensure it is clear, detailed, and accurately aligned with the user's intent.
+Then continue call the tool.""",
                 },
                 "preset_name": {
                     "type": "string",
-                    "description": """When the user requests generation based
-on a preset prompt, you must retrieve the name of that preset prompt and
-assign it to this parameter. If your prompt is a modification based on a preset prompt,
-this field must retain the original preset name so the tool can retrieve
-the correct generation parameters. You must be aware that the drawing style instructions
-expressed by the user may be preset names""",
+                    "description": """When filling in this parameter for the first time,
+you also need to use get_preset to retrieve the full content of that preset prompt.
+If your prompt is a modification based on a preset prompt, this field must retain
+the original preset name so the tool can retrieve the correct generation parameters.""",
                 },
                 "get_preset": {
                     "type": "boolean",
-                    "description": """If the user requests generation based on a preset prompt,
-                        you need to ask the user for the exact name of the preset. Once provided,
-                        set the option to True and assign the "preset_name" parameter to that
-                        preset name. The tool will return the preset prompt's content, allowing
-                        you to review and modify it as needed. Once you get the preset prompt and
-                        finish modifying it, you must put the revised prompt into the prompt
-                        parameter, and set this option to false.""",
+                    "description": """If you do not know the specific preset name and
+the user has not provided it, you may first use get_preset_name_list to retrieve the list
+of preset names. Once you have obtained, set the option to True and assign the "preset_name"
+parameter to that preset name. The tool will return the preset prompt's content,
+allowing you to review and modify it as needed. Once you get the preset prompt and
+finish modifying it, you must put the revised prompt into the prompt parameter,
+and set this option to false. Then continue call the tool.""",
                 },
                 "get_preset_name_list": {
                     "type": "boolean",
-                    "description": """If the preset name provided by the user is inaccurate,
-                        you may set this option to true. The tool will then return a list
-                        of all preset names, allowing you to accurately fill the correct
-                        preset into the preset_name parameter.""",
+                    "description": """If you need to get the list of preset names,
+set this option to true, then the tool will return a list of all preset names,
+allowing you to accurately fill the correct preset into the preset_name parameter.
+After obtaining the list, you must set this option back to false. Then continue call the tool.""",
                 },
             },
             "required": [],
@@ -77,7 +78,7 @@ expressed by the user may be preset names""",
     ) -> ToolExecResult:
         if self.instance is None:
             logger.warning("BigBanana 插件未初始化完成，无法处理请求")
-            return "插件未初始化完成，请稍后再试。"
+            return "BigBanana 插件未初始化完成，请稍后再试。"
         astr_agent_ctx = context.context  # type: ignore
         event: AstrMessageEvent = astr_agent_ctx.event
 
@@ -123,7 +124,7 @@ expressed by the user may be preset names""",
         if get_preset:
             if preset_name not in self.instance.prompt_dict:
                 logger.warning(f"未找到预设提示词：「{preset_name}」")
-                return f"未找到预设提示词：「{preset_name}」。请重新询问用户获取正确的预设名称，或者将「get_preset_name_list」参数设置为true，以获取完整的预设提示词名称列表。若不需要使用预设提示词，请将「preset_name」参数留空。"
+                return f"未找到预设提示词：「{preset_name}」。可用的预设提示词有：{', '.join(self.instance.prompt_dict.keys())}"
             params = self.instance.prompt_dict.get(preset_name, {})
             preset_prompt = params.get("prompt", "{{user_text}}")
             if preset_prompt == "{{user_text}}":
@@ -143,11 +144,19 @@ expressed by the user may be preset names""",
                 preset_prompt = params.get("prompt", "{{user_text}}")
 
         logger.info(f"生成图片提示词: {prompt}")
-        msg_chain = await self.instance._dispatch_generate_image(
+        msg_chain: list[
+            BaseMessageComponent
+        ] = await self.instance._dispatch_generate_image(
             event, params, prompt, is_llm_tool=True
         )
-        # 直接返回消息链好像发不出图片啊
-        return event.chain_result(msg_chain)
+        if any(isinstance(msg, Comp.Image) for msg in msg_chain):
+            await event.send(MessageChain(msg_chain))
+            return "图片已发送。"
+        else:
+            for msg in msg_chain:
+                if isinstance(msg, Comp.Plain):
+                    return msg.text
+            return "图片生成失败，请稍后再试。"
 
 
 def remove_tools(context: Context):

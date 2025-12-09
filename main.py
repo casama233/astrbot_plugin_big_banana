@@ -10,6 +10,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.core import AstrBotConfig
+from astrbot.core.message.components import BaseMessageComponent
 from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
 from .llm_tools import BigBananaTool, remove_tools
@@ -512,7 +513,7 @@ class BigBanana(Star):
         params: dict,
         prompt: str,
         is_llm_tool: bool = False,
-    ):
+    ) -> list[BaseMessageComponent]:
         """负责参数处理、调度提供商、密钥轮询等逻辑"""
         # 收集图片URL，后面统一处理
         image_urls = []
@@ -533,9 +534,6 @@ class BigBanana(Star):
             ):
                 qq = str(comp.qq)
                 self_id = event.get_self_id()
-                logger.info(
-                    f"{skipped_at_qq}, {qq}, {reply_sender_id}, {self_id}, {event.is_at_or_wake_command}, {is_llm_tool}"
-                )
                 # 如果At对象是被引用消息的发送者，跳过一次
                 if not skipped_at_qq and (
                     (qq == reply_sender_id and self.skip_quote_first)
