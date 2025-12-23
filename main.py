@@ -732,12 +732,17 @@ class BigBanana(Star):
         self,
         event: AstrMessageEvent,
         params: dict,
-        image_urls: list[str] = [],
-        referer_id: list[str] = [],
+        image_urls: list[str] | None = None,
+        referer_id: list[str] | None = None,
         is_llm_tool: bool = False,
     ) -> tuple[list[tuple[str, str]] | None, str | None]:
         """负责参数处理、调度提供商、保存图片等逻辑，返回图片b64列表或错误信息"""
         # 收集图片URL，后面统一处理
+        if image_urls is None:
+            image_urls = []
+
+        if referer_id is None:
+            referer_id = []
         # 小标记，用于优化At头像。当At对象是被引用消息的发送者时，跳过一次。
         skipped_at_qq = False
         reply_sender_id = ""
