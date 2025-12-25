@@ -16,6 +16,8 @@ from astrbot.core.platform.astr_message_event import AstrMessageEvent
 
 from .utils import clear_cache
 
+TOOLS_NAMESPACE = ["banana_preset_prompt", "banana_image_generation"]
+
 
 @dataclass
 class BigBananaPromptTool(FunctionTool[AstrAgentContext]):
@@ -69,7 +71,9 @@ class BigBananaPromptTool(FunctionTool[AstrAgentContext]):
             self.instance.group_whitelist_enabled
             and event.unified_msg_origin not in self.instance.group_whitelist
         ):
-            logger.info(f"[BIG BANANA] 群 {event.unified_msg_origin} 不在白名单内，跳过处理")
+            logger.info(
+                f"[BIG BANANA] 群 {event.unified_msg_origin} 不在白名单内，跳过处理"
+            )
             return "当前群不在白名单内，无法使用图片生成功能。"
 
         # 用户白名单判断
@@ -77,7 +81,9 @@ class BigBananaPromptTool(FunctionTool[AstrAgentContext]):
             self.instance.user_whitelist_enabled
             and event.get_sender_id() not in self.instance.user_whitelist
         ):
-            logger.info(f"[BIG BANANA] 用户 {event.get_sender_id()} 不在白名单内，跳过处理")
+            logger.info(
+                f"[BIG BANANA] 用户 {event.get_sender_id()} 不在白名单内，跳过处理"
+            )
             return "该用户不在白名单内，无法使用图片生成功能。"
 
         # 返回预设名称列表
@@ -93,7 +99,9 @@ class BigBananaPromptTool(FunctionTool[AstrAgentContext]):
         # 返回预设提示词内容
         if get_preset_prompt:
             if get_preset_prompt not in self.instance.prompt_dict:
-                logger.warning(f"[BIG BANANA] 未找到预设提示词：「{get_preset_prompt}」")
+                logger.warning(
+                    f"[BIG BANANA] 未找到预设提示词：「{get_preset_prompt}」"
+                )
                 return f"未找到预设提示词：「{get_preset_prompt}」。可用的预设提示词有：{', '.join(self.instance.prompt_dict.keys())}"
             params = self.instance.prompt_dict.get(get_preset_prompt, {})
             preset_prompt = params.get("prompt", "{{user_text}}")
@@ -177,7 +185,9 @@ class BigBananaTool(FunctionTool[AstrAgentContext]):
             self.instance.group_whitelist_enabled
             and event.unified_msg_origin not in self.instance.group_whitelist
         ):
-            logger.info(f"[BIG BANANA] 群 {event.unified_msg_origin} 不在白名单内，跳过处理")
+            logger.info(
+                f"[BIG BANANA] 群 {event.unified_msg_origin} 不在白名单内，跳过处理"
+            )
             return "当前群不在白名单内，无法使用图片生成功能。"
 
         # 用户白名单判断
@@ -185,7 +195,9 @@ class BigBananaTool(FunctionTool[AstrAgentContext]):
             self.instance.user_whitelist_enabled
             and event.get_sender_id() not in self.instance.user_whitelist
         ):
-            logger.info(f"[BIG BANANA] 用户 {event.get_sender_id()} 不在白名单内，跳过处理")
+            logger.info(
+                f"[BIG BANANA] 用户 {event.get_sender_id()} 不在白名单内，跳过处理"
+            )
             return "该用户不在白名单内，无法使用图片生成功能。"
 
         # 必须提供 prompt 或 preset_name 参数
@@ -232,7 +244,9 @@ class BigBananaTool(FunctionTool[AstrAgentContext]):
                 return err_msg or "图片生成失败，未返回任何结果。"
 
             # 组装消息链
-            msg_chain:list[BaseMessageComponent] = self.instance.build_message_chain(event, results)
+            msg_chain: list[BaseMessageComponent] = self.instance.build_message_chain(
+                event, results
+            )
             await event.send(MessageChain(chain=msg_chain))
             # 告知模型图片已发送
             logger.info("[BIG BANANA] 图片生成成功，已直接发送给用户")
@@ -248,7 +262,7 @@ class BigBananaTool(FunctionTool[AstrAgentContext]):
             if event.platform_meta.name == "telegram":
                 clear_cache(self.instance.temp_dir)
 
-        # 暂时不采用Astr的返回方法，改用手动发送，实现方法是一样的。
+        # 暂时不采用Astr的返回方法，改用手动发送，实现原理是一样的。
         # # 构建返回结果，Agent代码似乎只会取content的第一个元素
         # contents: list[ContentBlock] = []
         # for mime, b64_data in results:
@@ -265,11 +279,8 @@ class BigBananaTool(FunctionTool[AstrAgentContext]):
 
 def remove_tools(context: Context):
     func_tool = context.get_llm_tool_manager()
-    tool = func_tool.get_func("banana_preset_prompt")
-    if tool:
-        StarTools.unregister_llm_tool("banana_preset_prompt")
-        logger.info("[BIG BANANA] 已移除 banana_preset_prompt 工具注册")
-    tool = func_tool.get_func("banana_image_generation")
-    if tool:
-        StarTools.unregister_llm_tool("banana_image_generation")
-        logger.info("[BIG BANANA] 已移除 banana_image_generation 工具注册")
+    for name in TOOLS_NAMESPACE:
+        tool = func_tool.get_func(name)
+        if tool:
+            StarTools.unregister_llm_tool(name)
+            logger.info(f"[BIG BANANA] 已移除 {name} 工具注册")

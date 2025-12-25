@@ -30,8 +30,13 @@ PARAMS_LIST = [
     "aspect_ratio",
     "google_search",
     "preset_append",
-    "append_mode",
+    "gather_mode",
 ]
+
+# 参数别称映射
+PARAMS_ALIAS_MAP = {
+    "append_mode": "gather_mode",
+}
 
 # 支持的文件格式
 SUPPORTED_FILE_FORMATS = (
@@ -182,6 +187,10 @@ class BigBanana(Star):
                 break
             if token.startswith("--"):
                 key = token[2:]
+                # 处理参数别称映射
+                if key in PARAMS_ALIAS_MAP:
+                    key = PARAMS_ALIAS_MAP[key]
+                # 仅处理已知参数
                 if key in PARAMS_LIST:
                     value = next(tokens_iter, None)
                     if value is None:
@@ -621,15 +630,14 @@ class BigBanana(Star):
             new_prompt = preset_prompt.replace("{{user_text}}", user_prompt)
             params["prompt"] = new_prompt
 
-        # 收集追加模式的图片
+        # 处理收集模式
         image_urls = []
-        # 处理追加模式参数
-        if params.get("append_mode", self.prompt_config.append_mode):
+        if params.get("gather_mode", self.prompt_config.gather_mode):
             # 记录操作员账号
             operator_id = event.get_sender_id()
             # 取消标记
             is_cancel = False
-            yield event.plain_result(f"""📝 绘图追加模式已启用：
+            yield event.plain_result(f"""📝 绘图收集模式已启用：
 文本：{params["prompt"]}
 图片：{len(image_urls)} 张
 

@@ -5,7 +5,7 @@
         "default": [
             "bnn {{user_text}} --min_images 1",
             "bnt {{user_text}} --min_images 0",
-            "bna {{user_text}} --min_images 0 --append_mode",
+            "bna {{user_text}} --min_images 0 --gather_mode",
             "手办化 Create a premium, collectible 1/7 scale standalone figurine based on the image, meticulously replicating the character, made from smooth PVC and ABS plastic with a professional matte finish. It stands on a minimalist transparent acrylic base. Next to it is its retail packaging box displaying the price and brand information, with the figure wrapped in plastic inside the slightly larger box. They are naturally arranged on a clean wooden table surrounded by reference books, with a bookshelf in the background and soft afternoon sunlight streaming through the window. Photo-realistic, DSLR effect, depth of field, bokeh background."
         ],
         "hint": "格式1: 触发词 提示词 --参数1 参数值1 --参数2 参数值2。格式2: [触发词1,触发词2] 提示词 --参数1 参数值1 --参数2 参数值2。触发词和触发词列表不能有空格。若省略参数值，则视为布尔值true。占位提示词：{{user_text}}，占位提示词会被消息内容覆盖，用于自定义提示词，可以在占位提示词前后添加固定的预设提示词。可选的参数请参考 README.md。触发词冲突可能会相互覆盖。"
@@ -234,8 +234,8 @@
                 "default": "",
                 "hint": "填写格式是 文件名1,文件名2 把图片文件放在插件数据目录的 refer_images 文件夹下，这个参数指定的图片会优先传递给上下文。"
             },
-            "append_mode": {
-                "description": "启用多消息追加模式",
+            "gather_mode": {
+                "description": "启用收集模式",
                 "type": "bool",
                 "default": false,
                 "hint": "启用后插件不会立即开始画图，允许用户连续发送多条消息，直到回复「开始」，才会将收集到的文本和图片用于图片生成。"

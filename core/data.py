@@ -45,8 +45,8 @@ class PromptConfig:
     """是否启用谷歌搜索功能"""
     refer_images: str | None = None
     """引用参考图片的文件名"""
-    append_mode: bool = False
-    """是否启用追加模式"""
+    gather_mode: bool = False
+    """是否启用收集模式"""
 
 
 @dataclass(repr=False, slots=True)
