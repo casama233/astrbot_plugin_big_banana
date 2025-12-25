@@ -90,7 +90,7 @@ class OpenAIChatProvider(BaseProvider):
             return None, 408, "图片生成失败：响应超时"
         except json.JSONDecodeError as e:
             logger.error(
-                f"[BIG BANANA] JSON反序列化错误: {e}\n状态码：{response.status_code}，响应内容：{response.text[:1024]}"
+                f"[BIG BANANA] JSON反序列化错误: {e}，状态码：{response.status_code}，响应内容：{response.text[:1024]}"
             )
             return None, response.status_code, "图片生成失败：响应内容格式错误"
         except Exception as e:

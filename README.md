@@ -1,5 +1,3 @@
-### Beta: 在项目版本更新到 1.0.0 之前，不保证向后兼容。
-
 <div align="center">
 
 # 🍌 AstrBot Nano Banana Pro 图片生成插件 🍌

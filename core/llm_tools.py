@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 # from mcp.types import CallToolResult, ContentBlock, ImageContent
 from pydantic import Field
@@ -18,10 +20,13 @@ from .utils import clear_cache
 
 TOOLS_NAMESPACE = ["banana_preset_prompt", "banana_image_generation"]
 
+if TYPE_CHECKING:
+    from ..main import BigBanana
+
 
 @dataclass
 class BigBananaPromptTool(FunctionTool[AstrAgentContext]):
-    instance: Any | None = None
+    plugin: Any = None
     name: str = "banana_preset_prompt"  # 工具名称
     # fmt: off
     description: str = (
@@ -56,11 +61,11 @@ class BigBananaPromptTool(FunctionTool[AstrAgentContext]):
         context: ContextWrapper[AstrAgentContext],  # type: ignore
         **kwargs,
     ) -> ToolExecResult:
-        if self.instance is None:
+        if self.plugin is None:
             logger.warning("[BIG BANANA] 插件未初始化完成，无法处理请求")
             return "BigBanana 插件未初始化完成，请稍后再试。"
-        astr_agent_ctx = context.context  # type: ignore
-        event: AstrMessageEvent = astr_agent_ctx.event
+        plugin: BigBanana = self.plugin
+        event: AstrMessageEvent = context.context.event  # type: ignore
 
         # 获取参数
         get_preset_prompt = kwargs.get("get_preset_prompt", "")
@@ -68,8 +73,8 @@ class BigBananaPromptTool(FunctionTool[AstrAgentContext]):
 
         # 群白名单判断
         if (
-            self.instance.group_whitelist_enabled
-            and event.unified_msg_origin not in self.instance.group_whitelist
+            plugin.group_whitelist_enabled
+            and event.unified_msg_origin not in plugin.group_whitelist
         ):
             logger.info(
                 f"[BIG BANANA] 群 {event.unified_msg_origin} 不在白名单内，跳过处理"
@@ -78,8 +83,8 @@ class BigBananaPromptTool(FunctionTool[AstrAgentContext]):
 
         # 用户白名单判断
         if (
-            self.instance.user_whitelist_enabled
-            and event.get_sender_id() not in self.instance.user_whitelist
+            plugin.user_whitelist_enabled
+            and event.get_sender_id() not in plugin.user_whitelist
         ):
             logger.info(
                 f"[BIG BANANA] 用户 {event.get_sender_id()} 不在白名单内，跳过处理"
@@ -88,7 +93,7 @@ class BigBananaPromptTool(FunctionTool[AstrAgentContext]):
 
         # 返回预设名称列表
         if get_preset_name_list:
-            preset_name_list = list(self.instance.prompt_dict.keys())
+            preset_name_list = list(plugin.prompt_dict.keys())
             if not preset_name_list:
                 logger.info("[BIG BANANA] 当前没有可用的预设提示词")
                 return "当前没有可用的预设提示词。"
@@ -98,12 +103,12 @@ class BigBananaPromptTool(FunctionTool[AstrAgentContext]):
 
         # 返回预设提示词内容
         if get_preset_prompt:
-            if get_preset_prompt not in self.instance.prompt_dict:
+            if get_preset_prompt not in plugin.prompt_dict:
                 logger.warning(
                     f"[BIG BANANA] 未找到预设提示词：「{get_preset_prompt}」"
                 )
-                return f"未找到预设提示词：「{get_preset_prompt}」。可用的预设提示词有：{', '.join(self.instance.prompt_dict.keys())}"
-            params = self.instance.prompt_dict.get(get_preset_prompt, {})
+                return f"未找到预设提示词：「{get_preset_prompt}」。可用的预设提示词有：{', '.join(plugin.prompt_dict.keys())}"
+            params = plugin.prompt_dict.get(get_preset_prompt, {})
             preset_prompt = params.get("prompt", "{{user_text}}")
             if preset_prompt == "{{user_text}}":
                 logger.info("[BIG BANANA] 预设提示词为自定义提示词")
@@ -116,7 +121,7 @@ class BigBananaPromptTool(FunctionTool[AstrAgentContext]):
 
 @dataclass
 class BigBananaTool(FunctionTool[AstrAgentContext]):
-    instance: Any | None = None
+    plugin: Any = None
     name: str = "banana_image_generation"  # 工具名称
     # fmt: off
     description: str = (
@@ -169,11 +174,11 @@ class BigBananaTool(FunctionTool[AstrAgentContext]):
         context: ContextWrapper[AstrAgentContext],  # type: ignore
         **kwargs,
     ) -> ToolExecResult:
-        if self.instance is None:
+        if self.plugin is None:
             logger.warning("[BIG BANANA] 插件未初始化完成，无法处理请求")
             return "BigBanana 插件未初始化完成，请稍后再试。"
-        astr_agent_ctx = context.context  # type: ignore
-        event: AstrMessageEvent = astr_agent_ctx.event
+        plugin: BigBanana = self.plugin
+        event: AstrMessageEvent = context.context.event  # type: ignore
 
         # 获取参数
         prompt = kwargs.get("prompt", "anything")
@@ -182,8 +187,8 @@ class BigBananaTool(FunctionTool[AstrAgentContext]):
 
         # 群白名单判断
         if (
-            self.instance.group_whitelist_enabled
-            and event.unified_msg_origin not in self.instance.group_whitelist
+            plugin.group_whitelist_enabled
+            and event.unified_msg_origin not in plugin.group_whitelist
         ):
             logger.info(
                 f"[BIG BANANA] 群 {event.unified_msg_origin} 不在白名单内，跳过处理"
@@ -192,8 +197,8 @@ class BigBananaTool(FunctionTool[AstrAgentContext]):
 
         # 用户白名单判断
         if (
-            self.instance.user_whitelist_enabled
-            and event.get_sender_id() not in self.instance.user_whitelist
+            plugin.user_whitelist_enabled
+            and event.get_sender_id() not in plugin.user_whitelist
         ):
             logger.info(
                 f"[BIG BANANA] 用户 {event.get_sender_id()} 不在白名单内，跳过处理"
@@ -207,11 +212,11 @@ class BigBananaTool(FunctionTool[AstrAgentContext]):
 
         params = {}
         if preset_name:
-            if preset_name not in self.instance.prompt_dict:
+            if preset_name not in plugin.prompt_dict:
                 logger.warning(f"[BIG BANANA] 未找到预设提示词：「{preset_name}」")
                 return f"未找到预设提示词：「{preset_name}」，请使用有效的预设名称。"
             else:
-                params = self.instance.prompt_dict.get(preset_name, {})
+                params = plugin.prompt_dict.get(preset_name, {})
         if prompt:
             params["prompt"] = prompt
         if "{{user_text}}" in prompt:
@@ -227,24 +232,20 @@ class BigBananaTool(FunctionTool[AstrAgentContext]):
             return "referer_id 参数仅兼容 aiocqhttp 平台，当前消息平台不支持该参数。"
 
         logger.info(f"[BIG BANANA] 生成图片提示词: {prompt[:128]}")
-        # 检查函数还在不在
-        if getattr(self.instance, "job", None) is None:
-            logger.error("[BIG BANANA] 插件缺少 job 方法，无法生成图片")
-            return "BigBanana 插件初始化异常，请停止调用此工具。"
 
         # 创建后台任务
         task = asyncio.create_task(
-            self.instance.job(event, params, referer_id=referer_id, is_llm_tool=True)
+            plugin.job(event, params, referer_id=referer_id, is_llm_tool=True)
         )
         task_id = event.message_obj.message_id
-        self.instance.running_tasks[task_id] = task
+        plugin.running_tasks[task_id] = task
         try:
             results, err_msg = await task
             if not results or err_msg:
                 return err_msg or "图片生成失败，未返回任何结果。"
 
             # 组装消息链
-            msg_chain: list[BaseMessageComponent] = self.instance.build_message_chain(
+            msg_chain: list[BaseMessageComponent] = plugin.build_message_chain(
                 event, results
             )
             await event.send(MessageChain(chain=msg_chain))
@@ -257,10 +258,10 @@ class BigBananaTool(FunctionTool[AstrAgentContext]):
             logger.info(f"[BIG BANANA] {task_id} 任务被取消")
             return "图片生成任务被取消"
         finally:
-            self.instance.running_tasks.pop(task_id, None)
+            plugin.running_tasks.pop(task_id, None)
             # 目前只有 telegram 平台需要清理缓存
             if event.platform_meta.name == "telegram":
-                clear_cache(self.instance.temp_dir)
+                clear_cache(plugin.temp_dir)
 
         # 暂时不采用Astr的返回方法，改用手动发送，实现原理是一样的。
         # # 构建返回结果，Agent代码似乎只会取content的第一个元素

@@ -115,9 +115,9 @@ class BigBanana(Star):
 
         # 检查配置是否启用函数调用工具
         if self.conf.get("llm_tool_settings", {}).get("llm_tool_enabled", False):
-            self.context.add_llm_tools(BigBananaTool(instance=self))
+            self.context.add_llm_tools(BigBananaTool(plugin=self))
             logger.info("已注册函数调用工具: banana_image_generation")
-            self.context.add_llm_tools(BigBananaPromptTool(instance=self))
+            self.context.add_llm_tools(BigBananaPromptTool(plugin=self))
             logger.info("已注册函数调用工具: banana_preset_prompt")
 
     def init_providers(self):

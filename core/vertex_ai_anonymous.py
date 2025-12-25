@@ -132,7 +132,7 @@ class VertexAIAnonymousProvider(BaseProvider):
                     logger.warning(
                         f"[BIG BANANA] 请求成功，但未返回图片数据, 响应内容: {response.text[:1024]}"
                     )
-                    return None, None, "响应中未包含图片数据"
+                    return None, 999, "响应中未包含图片数据"
                 return b64_images, None, None
             else:
                 logger.error(
@@ -148,7 +148,7 @@ class VertexAIAnonymousProvider(BaseProvider):
             return None, None, "图片生成失败：响应超时"
         except json.JSONDecodeError as e:
             logger.error(
-                f"[BIG BANANA] JSON反序列化错误: {e}\n状态码：{response.status_code}，响应内容：{response.text[:1024]}"
+                f"[BIG BANANA] JSON反序列化错误: {e}，状态码：{response.status_code}，响应内容：{response.text[:1024]}"
             )
             return None, None, "图片生成失败：响应内容格式错误"
         except Exception as e:
