@@ -9,6 +9,28 @@ DEF_VERTEX_AI_ANONYMOUS_BASE_API = "https://cloudconsole-pa.clients6.google.com"
 # 类型枚举
 _API_Type = Literal["Gemini", "OpenAI_Chat", "Vertex_AI_Anonymous"]
 
+# 支持的文件格式
+SUPPORTED_FILE_FORMATS = (
+    "png",
+    "jpg",
+    "jpeg",
+    "webp",
+    "bmp",
+    "gif",
+    "heic",
+    "heif",
+)
+SUPPORTED_FILE_FORMATS_WITH_DOT = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".bmp",
+    ".gif",
+    ".heic",
+    ".heif",
+)
+
 
 @dataclass(repr=False, slots=True)
 class ProviderConfig:

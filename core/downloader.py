@@ -11,7 +11,7 @@ from PIL import Image
 
 from astrbot.api import logger
 
-from .data import CommonConfig
+from .data import SUPPORTED_FILE_FORMATS, CommonConfig
 
 
 class Downloader:
@@ -46,10 +46,16 @@ class Downloader:
             return None
         try:
             with Image.open(BytesIO(image_bytes)) as img:
-                fmt = (img.format or "").upper()
+                fmt = (img.format or "").lower()
+                if fmt not in SUPPORTED_FILE_FORMATS:
+                    logger.warning(f"[BIG BANANA] 不支持的图片格式: {fmt}")
+                    return None
                 # 如果不是 GIF，直接返回原图
-                if fmt != "GIF":
-                    mime = f"image/{fmt.lower()}"
+                if fmt != "gif":
+                    if fmt == "jpg":
+                        mime = "image/jpeg"
+                    else:
+                        mime = f"image/{fmt}"
                     b64 = base64.b64encode(image_bytes).decode("utf-8")
                     return (mime, b64)
                 # 处理 GIF
@@ -61,11 +67,8 @@ class Downloader:
                 b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
                 return ("image/png", b64)
         except Exception as e:
-            logger.warning(f"[BIG BANANA] GIF 处理失败，返回原图: {e}")
-            b64 = base64.b64encode(image_bytes).decode("utf-8")
-            if not b64:
-                return None
-            return ("image/gif", b64)
+            logger.warning(f"[BIG BANANA] GIF 处理失败: {e}")
+            return None
 
     async def _download_image(self, url: str) -> tuple[str, str] | None:
         try:
@@ -83,9 +86,7 @@ class Downloader:
             return content
         except (SSLError, CertificateVerifyError):
             # 关闭SSL验证
-            response = await self.session.get(
-                url, timeout=30, verify=False
-            )
+            response = await self.session.get(url, timeout=30, verify=False)
             if response.status_code != 200 or not response.content:
                 logger.warning(
                     f"[BIG BANANA] 图片下载失败，状态码: {response.status_code}"

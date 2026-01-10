@@ -13,6 +13,7 @@ from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
 from .core import BaseProvider, Downloader, HttpManager
 from .core.data import (
+    SUPPORTED_FILE_FORMATS_WITH_DOT,
     CommonConfig,
     PreferenceConfig,
     PromptConfig,
@@ -33,18 +34,6 @@ PARAMS_LIST = [
     "gather_mode",
     "providers",
 ]
-
-# 支持的文件格式
-SUPPORTED_FILE_FORMATS = (
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".webp",
-    ".bmp",
-    ".gif",
-    ".heic",
-    ".heif",
-)
 
 # 提供商配置键列表
 provider_list = ["main_provider", "back_provider", "back_provider2"]
@@ -695,7 +684,7 @@ class BigBanana(Star):
                         isinstance(comp, Comp.File)
                         and comp.url
                         and comp.url.startswith("http")
-                        and comp.url.lower().endswith(SUPPORTED_FILE_FORMATS)
+                        and comp.url.lower().endswith(SUPPORTED_FILE_FORMATS_WITH_DOT)
                     ):
                         image_urls.append(comp.url)
                 await event.send(
@@ -786,7 +775,7 @@ class BigBanana(Star):
                         isinstance(quote, Comp.File)
                         and quote.url
                         and quote.url.startswith("http")
-                        and quote.url.lower().endswith(SUPPORTED_FILE_FORMATS)
+                        and quote.url.lower().endswith(SUPPORTED_FILE_FORMATS_WITH_DOT)
                     ):
                         image_urls.append(quote.url)
             # 处理At对象的QQ头像（对于艾特机器人的问题，还没有特别好的解决方案）
@@ -820,7 +809,7 @@ class BigBanana(Star):
                 isinstance(comp, Comp.File)
                 and comp.url
                 and comp.url.startswith("http")
-                and comp.url.lower().endswith(SUPPORTED_FILE_FORMATS)
+                and comp.url.lower().endswith(SUPPORTED_FILE_FORMATS_WITH_DOT)
             ):
                 image_urls.append(comp.url)
 
