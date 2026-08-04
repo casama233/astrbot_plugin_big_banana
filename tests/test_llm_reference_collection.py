@@ -84,6 +84,19 @@ def test_explicit_mixed_references_keep_the_original_order(tmp_path: Path) -> No
     ]
 
 
+def test_qq_official_avatar_uses_appid_and_openid(tmp_path: Path) -> None:
+    event = build_event("qq_official")
+    event.bot = SimpleNamespace(
+        platform=SimpleNamespace(appid="123456")
+    )
+    plugin = build_plugin(tmp_path)
+    collector = ImageCollector(plugin=plugin, event=event, params={})
+
+    assert asyncio.run(
+        collector._get_avatar_url("OPENID123", event)
+    ) == "https://q.qlogo.cn/qqapp/123456/OPENID123/100"
+
+
 def test_process_and_add_image_returns_status_and_error(
     tmp_path: Path,
 ) -> None:

@@ -268,6 +268,14 @@ class ImageCollector:
             # 使用isdigit()排除AtAll的情况，AtAll继承自Comp.At
             return self.qq_avatar_url(user_id) if user_id.isdigit() else None
 
+        # QQ官方Bot
+        if self.platform_name in {"qq_official", "qq_official_webhook"}:
+            platform = getattr(self.client, "platform", None)
+            appid = getattr(platform, "appid", None)
+            if not appid or not user_id:
+                return None
+            return f"https://q.qlogo.cn/qqapp/{appid}/{user_id}/100"
+
         if self.platform_name == "telegram":
             if self.client is None:
                 logger.warning("[BIG BANANA] Telegram 客户端不可用，无法获取头像")
