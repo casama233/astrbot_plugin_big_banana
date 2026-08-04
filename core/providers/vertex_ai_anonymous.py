@@ -39,7 +39,7 @@ class VertexAIAnonymousProvider(BaseProvider):
         raw_config = self.provider_config.raw_config
         # 防止负数
         self.max_refresh = max(0, int(raw_config.get("max_refresh", 5)))
-        self.max_retry = max(0, int(raw_config.get("max_retry", 3)))
+        self.max_retry = max(0, int(raw_config.get("max_retry", 5)))
         self.retry_delay = raw_config.get("retry_delay", 1)
         self._body_context_cache: dict | None = None
 
@@ -59,6 +59,8 @@ class VertexAIAnonymousProvider(BaseProvider):
         same_token_retry_count = 0
         # 当前 Token 是否为首次验证失败
         is_first_verify_failure = True
+        # 当前 Token 超时重试次数
+        timeout_retry_count = 0
 
         while True:
             # 填充 recaptcha_token
@@ -77,61 +79,64 @@ class VertexAIAnonymousProvider(BaseProvider):
             status = call_result.status_code
             err_msg = call_result.error_message
 
-            # 5：通常是模型不存在、无权限等不可恢复错误，直接返回
+            # 独立的超时重试
+            if status == 408:
+                # 全局超时重试固定3次
+                if timeout_retry_count >= 3:
+                    return GenerationResult(
+                        error_message=err_msg or "图片生成失败：响应超时"
+                    )
+
+                timeout_retry_count += 1
+                if self.retry_delay > 0:
+                    await asyncio.sleep(self.retry_delay)
+                continue
+
+            is_verify_failure = (
+                status == 3 and err_msg and "Failed to verify action" in err_msg
+            )
+            is_invalid_token = (
+                status == 3 and err_msg and "Recaptcha token is invalid" in err_msg
+            )
+
+            # 代码5：通常是模型不存在、无权限等不可恢复错误，直接返回
             if status == 5:
                 return GenerationResult(error_message=err_msg)
 
-            # 判断是否为可重试的状态码 (3 或 8)
-            if status in (3, 8):
-                is_verify_failure = bool(
-                    status == 3 and err_msg and "Failed to verify action" in err_msg
-                )
-                # 原地重试，不消耗重试次数
-                if is_verify_failure and is_first_verify_failure:
-                    # 每个 recaptchaToken 第一次返回 "Failed to verify action"，不消耗重试次数
-                    is_first_verify_failure = False
-                    # logger.warning(
-                    #     f"[BIG BANANA] recaptcha_token 首次验证失败 (不消耗重试次数)："
-                    #     f"{same_token_retry_count}/{self.max_retry}"
-                    # )
-                    if self.retry_delay > 0:
-                        await asyncio.sleep(self.retry_delay)
-                    continue
+            # 代码3 存在多种情况，这里先处理Token首次验证失败的情况
+            if is_verify_failure and is_first_verify_failure:
+                is_first_verify_failure = False
+                if self.retry_delay > 0:
+                    await asyncio.sleep(self.retry_delay)
+                continue
 
-                # 往后无论是代码 3 还是代码 8，都消耗重试次数
-                same_token_retry_count += 1
-                logger.info(
-                    f"[BIG BANANA] recaptcha_token 重试 (status={status}) 次数："
-                    f"{same_token_retry_count}/{self.max_retry}"
-                )
-                if same_token_retry_count <= self.max_retry:
-                    if self.retry_delay > 0:
-                        await asyncio.sleep(self.retry_delay)
-                    continue
-
-                # 当同一 Token 的重试次数超过 max_retry，尝试刷新 recaptchaToken
+            # 这里处理Token需要刷新的情况，包括代码3：Token失效、代码8：同一个Token重试达到上限
+            if is_invalid_token or (
+                status in (3, 8) and same_token_retry_count >= self.max_retry
+            ):
+                # 刷新Token前检查是否达到最大刷新次数
                 if token_refresh_count >= self.max_refresh:
                     logger.warning("[BIG BANANA] recaptcha_token 刷新次数达到上限")
                     return GenerationResult(error_message=err_msg)
-
-                token_refresh_count += 1
-                logger.info(
-                    f"[BIG BANANA] recaptcha_token 重试次数达到上限，正在刷新..."
-                    f"({token_refresh_count}/{self.max_refresh})"
-                )
-                if self.retry_delay > 0:
-                    await asyncio.sleep(self.retry_delay)
-
+                # 刷新Token
                 recaptcha_token = await self._get_recaptcha_token()
                 if recaptcha_token is None:
-                    logger.error("[BIG BANANA] 获取 recaptcha_token 失败次数达到上限")
-                    return GenerationResult(error_message="获取 recaptcha_token 失败")
-
+                    return GenerationResult(error_message=err_msg)
+                token_refresh_count += 1
                 same_token_retry_count = 0
                 is_first_verify_failure = True
+                if self.retry_delay > 0:
+                    await asyncio.sleep(self.retry_delay)
                 continue
 
-            # 其他未单独处理的状态码直接返回
+            # 现在只剩代码3的非首次验证失败、代码8可以消耗重试次数进行重试了
+            if is_verify_failure or status == 8:
+                same_token_retry_count += 1
+                if self.retry_delay > 0:
+                    await asyncio.sleep(self.retry_delay)
+                continue
+
+            # 其他未单独处理的状态码直接返回错误信息，包括错误代码3的数据结构原因
             return GenerationResult(error_message=err_msg or "图片生成失败")
 
     async def _call_vertex_api(self, body: dict) -> ProviderCallResult:
@@ -387,47 +392,51 @@ class VertexAIAnonymousProvider(BaseProvider):
 
     async def _execute_recaptcha(self, anchor_url: str, reload_url: str) -> str | None:
         """执行 anchor/reload 流程解析最终 reCAPTCHA 响应"""
-        anchor_html = await self.session.get(
-            anchor_url,
-            impersonate="chrome131",
-            proxy=self.proxy,
-            timeout=self.timeout,
-        )
-        soup = BeautifulSoup(anchor_html.text, "html.parser")
-        token_element = soup.find("input", {"id": "recaptcha-token"})
-        if token_element is None:
-            logger.error("[BIG BANANA] anchor_html 未找到 recaptcha-token 元素")
-            return None
-        base_recaptcha_token = str(token_element.get("value"))
+        try:
+            anchor_html = await self.session.get(
+                anchor_url,
+                impersonate="chrome131",
+                proxy=self.proxy,
+                timeout=self.timeout,
+            )
+            soup = BeautifulSoup(anchor_html.text, "html.parser")
+            token_element = soup.find("input", {"id": "recaptcha-token"})
+            if token_element is None:
+                logger.error("[BIG BANANA] anchor_html 未找到 recaptcha-token 元素")
+                return None
+            base_recaptcha_token = str(token_element.get("value"))
 
-        parsed = urlparse(anchor_url)
-        params = parse_qs(parsed.query)
-        payload = {
-            "v": params["v"][0],
-            "reason": "q",
-            "k": params["k"][0],
-            "c": base_recaptcha_token,
-            "co": params["co"][0],
-            "hl": params["hl"][0],
-            "size": "invisible",
-            "vh": "6581054572",
-            "chr": "",
-            "bg": "",
-        }
-        reload_response = await self.session.post(
-            reload_url,
-            data=payload,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            impersonate="chrome131",
-            proxy=self.proxy,
-            timeout=self.timeout,
-        )
+            parsed = urlparse(anchor_url)
+            params = parse_qs(parsed.query)
+            payload = {
+                "v": params["v"][0],
+                "reason": "q",
+                "k": params["k"][0],
+                "c": base_recaptcha_token,
+                "co": params["co"][0],
+                "hl": params["hl"][0],
+                "size": "invisible",
+                "vh": "6581054572",
+                "chr": "",
+                "bg": "",
+            }
+            reload_response = await self.session.post(
+                reload_url,
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                impersonate="chrome131",
+                proxy=self.proxy,
+                timeout=self.timeout,
+            )
 
-        match = re.search(r'rresp","(.*?)"', reload_response.text)
-        if not match:
-            logger.error("[BIG BANANA] 未找到 rresp")
+            match = re.search(r'rresp","(.*?)"', reload_response.text)
+            if not match:
+                logger.error("[BIG BANANA] 未找到 rresp")
+                return None
+            return match.group(1)
+        except Exception as e:
+            logger.error(f"[BIG BANANA] 获取 recaptcha_token 失败: {e}")
             return None
-        return match.group(1)
 
 
 def random_string(length: int) -> str:

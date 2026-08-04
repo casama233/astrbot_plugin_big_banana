@@ -1014,7 +1014,7 @@
             "max_retry": {
                 "description": "最大重试次数",
                 "type": "int",
-                "default": 3,
+                "default": 1,
                 "hint": "每个Key的最大重试次数"
             },
             "fallback_on_empty_result": {

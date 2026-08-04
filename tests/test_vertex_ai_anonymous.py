@@ -104,30 +104,17 @@ def test_verify_failures_reuse_token_until_retry_limit(monkeypatch) -> None:
         return ProviderCallResult(images=[Mock(bytes=b"image")], status_code=200)
 
     provider._call_vertex_api = AsyncMock(side_effect=call_vertex)
-    warning = Mock()
 
     async def no_sleep(_delay: float) -> None:
         return None
 
     monkeypatch.setattr(asyncio, "sleep", no_sleep)
-    monkeypatch.setattr(vertex_ai_anonymous.logger, "warning", warning)
 
     result = asyncio.run(provider.generate_images())
 
     assert result.images
     assert submitted_tokens == ["token-1"] * 4 + ["token-2"]
     assert provider._get_recaptcha_token.await_count == 2
-    verify_logs = [
-        call.args[0]
-        for call in warning.call_args_list
-        if "recaptcha_token" in call.args[0]
-    ]
-    assert verify_logs == [
-        "[BIG BANANA] recaptcha_token 首次验证失败 (不消耗重试次数)：0/2",
-        "[BIG BANANA] recaptcha_token 重试 (status=3) 次数：1/2",
-        "[BIG BANANA] recaptcha_token 重试 (status=3) 次数：2/2",
-        "[BIG BANANA] recaptcha_token 重试 (status=3) 次数：3/2",
-    ]
 
 
 def test_verify_failures_stop_after_token_refresh_limit(monkeypatch) -> None:
@@ -139,19 +126,19 @@ def test_verify_failures_stop_after_token_refresh_limit(monkeypatch) -> None:
 
     async def call_vertex(body: dict) -> ProviderCallResult:
         submitted_tokens.append(body["variables"]["recaptchaToken"])
+        if len(submitted_tokens) > 20:
+            raise AssertionError("重试次数超过预期，疑似无限循环")
         return ProviderCallResult(
             status_code=3,
             error_message="Failed to verify action",
         )
 
     provider._call_vertex_api = AsyncMock(side_effect=call_vertex)
-    warning = Mock()
 
     async def no_sleep(_delay: float) -> None:
         return None
 
     monkeypatch.setattr(asyncio, "sleep", no_sleep)
-    monkeypatch.setattr(vertex_ai_anonymous.logger, "warning", warning)
 
     result = asyncio.run(provider.generate_images())
 
@@ -159,22 +146,6 @@ def test_verify_failures_stop_after_token_refresh_limit(monkeypatch) -> None:
     assert submitted_tokens == ["token-1"] * 4 + ["token-2"] * 4
     assert provider._get_recaptcha_token.await_count == 2
     assert provider._call_vertex_api.await_count == 8
-    verify_logs = [
-        call.args[0]
-        for call in warning.call_args_list
-        if "recaptcha_token" in call.args[0]
-    ]
-    assert verify_logs == [
-        "[BIG BANANA] recaptcha_token 首次验证失败 (不消耗重试次数)：0/2",
-        "[BIG BANANA] recaptcha_token 重试 (status=3) 次数：1/2",
-        "[BIG BANANA] recaptcha_token 重试 (status=3) 次数：2/2",
-        "[BIG BANANA] recaptcha_token 重试 (status=3) 次数：3/2",
-        "[BIG BANANA] recaptcha_token 首次验证失败 (不消耗重试次数)：0/2",
-        "[BIG BANANA] recaptcha_token 重试 (status=3) 次数：1/2",
-        "[BIG BANANA] recaptcha_token 重试 (status=3) 次数：2/2",
-        "[BIG BANANA] recaptcha_token 重试 (status=3) 次数：3/2",
-        "[BIG BANANA] recaptcha_token 刷新次数达到上限",
-    ]
 
 
 def test_stops_after_configured_token_refresh_limit(monkeypatch) -> None:
@@ -232,6 +203,22 @@ def test_non_recaptcha_error_uses_neutral_fallback() -> None:
     assert provider._call_vertex_api.await_count == 1
 
 
+def test_timeout_retries_three_times() -> None:
+    provider = build_provider()
+    provider._get_recaptcha_token = AsyncMock(return_value="token-1")
+    provider._call_vertex_api = AsyncMock(
+        return_value=ProviderCallResult(
+            status_code=408,
+            error_message="图片生成失败：响应超时",
+        )
+    )
+
+    result = asyncio.run(provider.generate_images())
+
+    assert result.error_message == "图片生成失败：响应超时"
+    assert provider._call_vertex_api.await_count == 4
+
+
 def test_status_8_refreshes_token_and_retries(monkeypatch) -> None:
     provider = build_provider()
     provider.max_retry = 0
@@ -261,5 +248,3 @@ def test_status_8_refreshes_token_and_retries(monkeypatch) -> None:
     assert result.images
     assert submitted_tokens == ["token-1", "token-2"]
     assert provider._get_recaptcha_token.await_count == 2
-
-
