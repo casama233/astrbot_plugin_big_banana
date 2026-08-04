@@ -61,8 +61,18 @@ class VertexAIAnonymousProvider(BaseProvider):
         is_first_verify_failure = True
         # 当前 Token 超时重试次数
         timeout_retry_count = 0
+        # 总共尝试次数
+        total_attempt_count = 0
+        # 总共最大尝试次数
+        max_total_attempts = (self.max_refresh + 1) * (self.max_retry + 2) + 3
 
         while True:
+            # 防死循环熔断
+            total_attempt_count += 1
+            if total_attempt_count > max_total_attempts:
+                logger.error("[BIG BANANA] 重试次数异常，触发防死循环熔断")
+                return GenerationResult(error_message="图片生成失败：重试次数异常")
+
             # 填充 recaptcha_token
             body["variables"]["recaptchaToken"] = recaptcha_token
             # 调用接口
@@ -72,12 +82,12 @@ class VertexAIAnonymousProvider(BaseProvider):
             if call_result.images:
                 return GenerationResult(images=dedupe_images(call_result.images))
 
-            # 未拿到有效上游状态码时不重试
-            if call_result.status_code == 0:
-                return GenerationResult(error_message=call_result.error_message)
-
             status = call_result.status_code
             err_msg = call_result.error_message
+
+            # 未拿到有效上游状态码时不重试
+            if status == 0:
+                return GenerationResult(error_message=err_msg)
 
             # 独立的超时重试
             if status == 408:

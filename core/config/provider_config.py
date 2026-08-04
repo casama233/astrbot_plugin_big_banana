@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from astrbot.api import logger
@@ -53,6 +54,21 @@ class ProviderConfigManager:
     def get_default_providers(self, capability: str) -> list[str]:
         """返回指定能力的默认提供商副本。"""
         return list(self.default_providers_by_capability.get(capability, []))
+
+    def get_provider_config(self, provider_name: str) -> ProviderConfig | None:
+        """按模板提供商名称读取配置，支持临时覆写模型。"""
+        provider_config = self.provider_configs.get(provider_name)
+        if provider_config is not None:
+            return provider_config
+
+        template_name, separator, model = provider_name.partition("/")
+        if not separator or not model.strip():
+            return None
+
+        template_config = self.provider_configs.get(template_name)
+        if template_config is None:
+            return None
+        return replace(template_config, model=model.strip())
 
     def _build_provider_configs(self) -> dict[str, ProviderConfig]:
         """解析模板提供商"""

@@ -116,3 +116,16 @@ def test_consecutive_valueless_boolean_parameters_preserve_prompt() -> None:
         "sub_brain": True,
         "prompt": "castle at night",
     }
+
+
+def test_provider_model_reference_is_preserved_during_prompt_parsing() -> None:
+    manager = PromptConfigManager({})
+
+    params = manager.parse_prompt_params(
+        "--providers gpt2/gpt-image-2,native/model-a castle at night"
+    )
+
+    assert params == {
+        "providers": ["gpt2/gpt-image-2", "native/model-a"],
+        "prompt": "castle at night",
+    }

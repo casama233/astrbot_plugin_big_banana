@@ -156,7 +156,8 @@ class PromptConfigManager:
                             tokens_iter = itertools.chain([value], tokens_iter)
                             continue
                         if key == "providers":
-                            # 预解析成列表
+                            # 预解析成列表，保留“提供商/模型”原始引用，
+                            # 由提供商调度阶段按模板提供商或原生提供商解析。
                             params[key] = [
                                 p.strip() for p in value.split(",") if p.strip()
                             ]

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from core.config.provider_config import ProviderConfigManager
 from core.drawing.dispatcher import ProviderDispatcher
 from core.schemas import GenerationResult, ImageResource, ProviderConfig
 
@@ -62,3 +63,44 @@ async def test_all_empty_results_return_a_clear_error_when_fallback_enabled() ->
 
     assert result.error_message == "提供商 second 未返回图片"
     assert dispatcher._dispatch_provider.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_template_provider_model_override_is_request_scoped() -> None:
+    provider_config_manager = ProviderConfigManager(
+        {
+            "provider_template": [
+                {
+                    "name": "gpt2",
+                    "provider_type": "OpenAI_Images",
+                    "capability": "image_generation",
+                    "enabled": True,
+                    "enabled_as_default": False,
+                    "fallback_order": 0,
+                    "model": "gpt-image-1",
+                }
+            ],
+            "default_astr_providers": [],
+        }
+    )
+    configured_provider = provider_config_manager.provider_configs["gpt2"]
+    get_native_provider = AsyncMock(return_value=None)
+    plugin = SimpleNamespace(
+        provider_config_manager=provider_config_manager,
+        context=SimpleNamespace(
+            provider_manager=SimpleNamespace(
+                get_provider_by_id=get_native_provider,
+            )
+        ),
+    )
+    dispatcher = ProviderDispatcher(plugin)
+    overridden = await dispatcher._get_provider_config("gpt2/gpt-image-2")
+    unchanged = await dispatcher._get_provider_config("gpt2")
+
+    assert overridden is not configured_provider
+    assert overridden is not None
+    assert overridden.name == "gpt2"
+    assert overridden.model == "gpt-image-2"
+    assert unchanged is configured_provider
+    assert configured_provider.model == "gpt-image-1"
+    get_native_provider.assert_not_awaited()

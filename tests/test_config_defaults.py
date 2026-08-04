@@ -13,14 +13,17 @@ def test_background_tasks_are_disabled_by_default() -> None:
     assert LlmToolsConfig().llm_tool_allow_custom_url is False
 
 
-def test_llm_tool_presets_are_disabled_when_not_configured() -> None:
+def test_llm_tool_presets_allow_empty_to_disable_and_have_recommended_defaults() -> None:
     schema = json.loads((ROOT / "_conf_schema.json").read_text(encoding="utf-8"))
     llm_tool_items = schema["llm_tools"]["items"]
 
     assert LlmToolsConfig().llm_tool_preset_name == ""
     assert LlmToolsConfig().llm_video_tool_preset_name == ""
-    assert llm_tool_items["llm_tool_preset_name"]["default"] == ""
-    assert llm_tool_items["llm_video_tool_preset_name"]["default"] == ""
+    assert llm_tool_items["llm_tool_preset_name"]["default"] == "llm_default"
+    assert (
+        llm_tool_items["llm_video_tool_preset_name"]["default"]
+        == "llm_video_default"
+    )
     assert LlmToolsConfig().llm_tool_max_tasks_per_session == 1
     assert llm_tool_items["llm_tool_max_tasks_per_session"]["default"] == 1
 

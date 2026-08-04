@@ -127,11 +127,12 @@ class ProviderDispatcher:
     ) -> ProviderConfig | None:
         """读取 provider 配置"""
         # 先尝试从模板提供商中读取配置
-        provider_config = self.plugin.provider_config_manager.provider_configs.get(
+        provider_config = self.plugin.provider_config_manager.get_provider_config(
             provider_name
         )
         if provider_config is not None:
             return provider_config
+
         # 没有找到模板提供商，尝试从原生提供商查找
         provider = await self.plugin.context.provider_manager.get_provider_by_id(
             provider_name

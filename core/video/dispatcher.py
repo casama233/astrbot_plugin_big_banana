@@ -51,7 +51,7 @@ class VideoProviderDispatcher:
 
         last_error: str | None = None
         for provider_name in provider_names:
-            provider_config = self.plugin.provider_config_manager.provider_configs.get(
+            provider_config = self.plugin.provider_config_manager.get_provider_config(
                 provider_name
             )
             if provider_config is None:
