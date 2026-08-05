@@ -94,7 +94,7 @@ def test_qq_official_avatar_uses_appid_and_openid(tmp_path: Path) -> None:
 
     assert asyncio.run(
         collector._get_avatar_url("OPENID123", event)
-    ) == "https://q.qlogo.cn/qqapp/123456/OPENID123/100"
+    ) == "https://q.qlogo.cn/qqapp/123456/OPENID123/0"
 
 
 def test_process_and_add_image_returns_status_and_error(
@@ -206,6 +206,54 @@ def test_add_msg_images_records_only_the_at_image_position(tmp_path: Path) -> No
     ]
     assert collector.avatar_mappings == {"123": 2}
     assert collector.image_supplement_infos == ["- @123: avatar is image 2"]
+
+
+def test_add_msg_images_extracts_qq_official_mentions_from_plain_text(
+    tmp_path: Path,
+) -> None:
+    event = build_event("qq_official")
+    event.bot = SimpleNamespace(platform=SimpleNamespace(appid="123456"))
+    event.message_obj = SimpleNamespace(message_id="message-1")
+    event.get_messages = lambda: [
+        Comp.Plain(
+            text=(
+                "bnn 画三个人合影 "
+                "<@B04BC973DCA06850A8CEC05FB08A3F50> "
+                "<@!65A887A4AF1BE5639DC11C46B052276A> "
+                "<@B04BC973DCA06850A8CEC05FB08A3F50>"
+            )
+        )
+    ]
+    event.get_self_id = lambda: "qq_official"
+    event.is_at_or_wake_command = False
+    plugin = build_plugin(
+        tmp_path,
+        fetched_results=[
+            ImageResource("image/png", b"first-avatar"),
+            ImageResource("image/png", b"second-avatar"),
+        ],
+    )
+    collector = ImageCollector(plugin=plugin, event=event, params={})
+
+    asyncio.run(collector.add_msg_images())
+
+    expected_urls = [
+        asyncio.run(
+            collector._get_avatar_url(
+                "B04BC973DCA06850A8CEC05FB08A3F50", event
+            )
+        ),
+        asyncio.run(
+            collector._get_avatar_url(
+                "65A887A4AF1BE5639DC11C46B052276A", event
+            )
+        ),
+    ]
+    assert [image.url for image in collector.images] == expected_urls
+    assert collector.avatar_mappings == {
+        "B04BC973DCA06850A8CEC05FB08A3F50": 1,
+        "65A887A4AF1BE5639DC11C46B052276A": 2,
+    }
 
 
 def test_different_references_with_same_content_are_collected_separately(

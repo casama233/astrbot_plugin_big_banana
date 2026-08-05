@@ -12,6 +12,8 @@ from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 
 from ..schemas import SUPPORTED_FILE_FORMATS_WITH_DOT
 
+_QQ_OFFICIAL_MENTION_RE = re.compile(r"<@!?([0-9A-Fa-f]{32})>")
+
 if TYPE_CHECKING:
     from astrbot.api.event import AstrMessageEvent
 
@@ -112,6 +114,7 @@ class ImageCollector:
         reply_sender_id = ""
 
         for comp in event.get_messages():
+            avatar_user_ids: list[str] = []
             # 引用回复中仅读取图片
             if isinstance(comp, Comp.Reply) and comp.chain:
                 reply_sender_id = str(comp.sender_id)
@@ -135,7 +138,33 @@ class ImageCollector:
                             await self._process_and_add_image(file_ref)
             # 收集@头像
             elif isinstance(comp, Comp.At) and comp.qq:
-                user_id = str(comp.qq)
+                avatar_user_ids = [str(comp.qq)]
+            elif (
+                self.platform_name in {"qq_official", "qq_official_webhook"}
+                and isinstance(comp, Comp.Plain)
+            ):
+                avatar_user_ids = list(
+                    dict.fromkeys(_QQ_OFFICIAL_MENTION_RE.findall(comp.text))
+                )
+            elif isinstance(comp, Comp.Image):
+                image_ref = self._component_ref(comp, "url", "file", "path")
+                if image_ref:
+                    await self._process_and_add_image(image_ref)
+            elif isinstance(comp, Comp.File):
+                file_ref = self._component_ref(comp, "url", "file_", "file", "path")
+                is_valid_url = file_ref and str(file_ref).lower().endswith(
+                    SUPPORTED_FILE_FORMATS_WITH_DOT
+                )
+                is_valid_name = comp.name and comp.name.lower().endswith(
+                    SUPPORTED_FILE_FORMATS_WITH_DOT
+                )
+
+                if file_ref and (is_valid_url or is_valid_name):
+                    await self._process_and_add_image(file_ref)
+            else:
+                continue
+
+            for user_id in avatar_user_ids:
                 self_id = event.get_self_id()
                 if not skipped_at_avatar and (
                     # 如果At对象是被引用消息的发送者，跳过一次
@@ -157,23 +186,6 @@ class ImageCollector:
                         added, _ = await self._process_and_add_image(avatar_url)
                         if added:
                             self._record_avatar_image(user_id, len(self.images))
-            elif isinstance(comp, Comp.Image):
-                image_ref = self._component_ref(comp, "url", "file", "path")
-                if image_ref:
-                    await self._process_and_add_image(image_ref)
-            elif isinstance(comp, Comp.File):
-                file_ref = self._component_ref(comp, "url", "file_", "file", "path")
-                is_valid_url = file_ref and str(file_ref).lower().endswith(
-                    SUPPORTED_FILE_FORMATS_WITH_DOT
-                )
-                is_valid_name = comp.name and comp.name.lower().endswith(
-                    SUPPORTED_FILE_FORMATS_WITH_DOT
-                )
-
-                if file_ref and (is_valid_url or is_valid_name):
-                    await self._process_and_add_image(file_ref)
-            else:
-                continue
 
     async def supplement_avatars(self) -> None:
         """补充可获取的用户头像。"""
@@ -273,8 +285,11 @@ class ImageCollector:
             platform = getattr(self.client, "platform", None)
             appid = getattr(platform, "appid", None)
             if not appid or not user_id:
+                logger.warning(
+                    "[BIG BANANA] QQ官方Bot appid或user_id不可用，无法获取头像"
+                )
                 return None
-            return f"https://q.qlogo.cn/qqapp/{appid}/{user_id}/100"
+            return f"https://q.qlogo.cn/qqapp/{appid}/{user_id}/0"
 
         if self.platform_name == "telegram":
             if self.client is None:
