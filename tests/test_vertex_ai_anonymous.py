@@ -88,6 +88,73 @@ def test_initialize_reads_recaptcha_retry_settings() -> None:
     assert provider.max_refresh == 2
     assert provider.max_retry == 6
     assert provider.retry_delay == 0
+    assert provider.random_fingerprint is False
+
+
+def test_initialize_reads_random_fingerprint_setting() -> None:
+    plugin = SimpleNamespace(
+        http_manager=SimpleNamespace(get_curl_session=Mock(return_value=object())),
+        common_config=SimpleNamespace(timeout=30, proxy=None),
+    )
+    config = ProviderConfig(
+        provider_type="Vertex_AI_Anonymous",
+        name="vertex_ai_anonymous",
+        raw_config={"random_fingerprint": True},
+    )
+    provider = VertexAIAnonymousProvider(plugin, config, {"prompt": "test"})
+
+    asyncio.run(provider.initialize())
+
+    assert provider.random_fingerprint is True
+
+
+def test_impersonate_defaults_to_chrome131() -> None:
+    provider = build_provider()
+    provider.random_fingerprint = False
+
+    assert provider._get_impersonate() == "chrome131"
+
+
+def test_random_impersonate_is_selected_for_each_request(monkeypatch) -> None:
+    provider = build_provider()
+    provider.random_fingerprint = True
+    choice = Mock(side_effect=["chrome120", "chrome124"])
+    monkeypatch.setattr(vertex_ai_anonymous.random, "choice", choice)
+
+    assert provider._get_impersonate() == "chrome120"
+    assert provider._get_impersonate() == "chrome124"
+    assert choice.call_count == 2
+
+
+def test_recaptcha_requests_reuse_one_impersonate(monkeypatch) -> None:
+    provider = build_provider()
+    provider.random_fingerprint = True
+    provider.timeout = 30
+    provider.proxy = None
+    provider.session = SimpleNamespace(
+        get=AsyncMock(
+            return_value=SimpleNamespace(
+                text='<input id="recaptcha-token" value="base-token">'
+            )
+        ),
+        post=AsyncMock(return_value=SimpleNamespace(text='rresp","token-1"')),
+    )
+    choice = Mock(return_value="chrome123")
+    monkeypatch.setattr(vertex_ai_anonymous.random, "choice", choice)
+
+    result = asyncio.run(
+        provider._execute_recaptcha(
+            "https://example.com/anchor?v=version&k=site-key&co=origin&hl=zh-CN",
+            "https://example.com/reload?k=site-key",
+        )
+    )
+
+    assert result == "token-1"
+    assert provider.session.get.await_args.kwargs["impersonate"] == "chrome123"
+    assert provider.session.post.await_args.kwargs["impersonate"] == "chrome123"
+    assert choice.call_count == 1
+
+
 def test_verify_failures_reuse_token_until_retry_limit(monkeypatch) -> None:
     provider = build_provider()
     provider.max_retry = 2

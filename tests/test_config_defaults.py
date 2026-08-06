@@ -83,6 +83,7 @@ def test_vertex_anonymous_retry_controls_are_in_provider_template() -> None:
     assert default_provider["max_refresh"] == 5
     assert default_provider["max_retry"] == 5
     assert default_provider["retry_delay"] == 1
+    assert default_provider["random_fingerprint"] is False
     assert "max_recaptcha_retry" not in default_provider
     assert "retry_before_switch" not in default_provider
     assert provider_items["max_refresh"]["default"] == 5
@@ -94,5 +95,7 @@ def test_vertex_anonymous_retry_controls_are_in_provider_template() -> None:
         "recaptchaToken 最大重试次数"
     )
     assert provider_items["retry_delay"]["default"] == 1
+    assert provider_items["random_fingerprint"]["default"] is False
+    assert provider_items["random_fingerprint"]["type"] == "bool"
     assert "max_recaptcha_retry" not in provider_items
     assert "retry_before_switch" not in provider_items

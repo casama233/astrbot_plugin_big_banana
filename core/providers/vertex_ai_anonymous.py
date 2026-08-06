@@ -2,10 +2,11 @@ import asyncio
 import json
 import random
 import re
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
+from curl_cffi.requests import BrowserType, BrowserTypeLiteral
 from curl_cffi.requests.exceptions import Timeout
 
 from astrbot.api import logger
@@ -20,6 +21,14 @@ STREAM_OPERATION_NAME = "StreamGenerateContentAnonymous"  # 这个修改无效
 RECAPTCHA_SITE_KEY = "6LdCjtspAAAAAMcV4TGdWLJqRTEk1TfpdLqEnKdj"
 RECAPTCHA_VERSION = "jdMmXeCQEkPbnFDy9T04NbgJ"
 RECAPTCHA_CO = "aHR0cHM6Ly9jb25zb2xlLmNsb3VkLmdvb2dsZS5jb206NDQz"
+DEFAULT_IMPERSONATE: BrowserTypeLiteral = cast(
+    BrowserTypeLiteral, BrowserType.chrome131.value
+)
+RANDOM_IMPERSONATES: tuple[BrowserTypeLiteral, ...] = tuple(
+    cast(BrowserTypeLiteral, browser.value)
+    for browser in BrowserType
+    if not browser.value.endswith(("_android", "_ios"))
+)
 
 
 class VertexAIAnonymousProvider(BaseProvider):
@@ -41,6 +50,7 @@ class VertexAIAnonymousProvider(BaseProvider):
         self.max_refresh = max(0, int(raw_config.get("max_refresh", 5)))
         self.max_retry = max(0, int(raw_config.get("max_retry", 5)))
         self.retry_delay = raw_config.get("retry_delay", 1)
+        self.random_fingerprint = raw_config.get("random_fingerprint", False)
         self._body_context_cache: dict | None = None
 
     async def generate_images(self) -> GenerationResult:
@@ -162,7 +172,7 @@ class VertexAIAnonymousProvider(BaseProvider):
                 },
                 json=body,
                 timeout=self.timeout,
-                impersonate="chrome131",
+                impersonate=self._get_impersonate(),
                 proxy=self.proxy,
             )
             response_text = response.text
@@ -403,9 +413,11 @@ class VertexAIAnonymousProvider(BaseProvider):
     async def _execute_recaptcha(self, anchor_url: str, reload_url: str) -> str | None:
         """执行 anchor/reload 流程解析最终 reCAPTCHA 响应"""
         try:
+            # anchor 和 reload 属于同一次 reCAPTCHA 流程，必须复用同一个指纹。
+            impersonate = self._get_impersonate()
             anchor_html = await self.session.get(
                 anchor_url,
-                impersonate="chrome131",
+                impersonate=impersonate,
                 proxy=self.proxy,
                 timeout=self.timeout,
             )
@@ -434,7 +446,7 @@ class VertexAIAnonymousProvider(BaseProvider):
                 reload_url,
                 data=payload,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
-                impersonate="chrome131",
+                impersonate=impersonate,
                 proxy=self.proxy,
                 timeout=self.timeout,
             )
@@ -447,6 +459,12 @@ class VertexAIAnonymousProvider(BaseProvider):
         except Exception as e:
             logger.error(f"[BIG BANANA] 获取 recaptcha_token 失败: {e}")
             return None
+
+    def _get_impersonate(self) -> BrowserTypeLiteral:
+        """返回当前请求使用的 curl_cffi 浏览器指纹。"""
+        if self.random_fingerprint:
+            return random.choice(RANDOM_IMPERSONATES)
+        return DEFAULT_IMPERSONATE
 
 
 def random_string(length: int) -> str:

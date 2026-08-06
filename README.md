@@ -29,7 +29,7 @@ V2（`v0.2.x`）以全新的配置结构和生成管线为基线，不保证兼�
 - 支持多消息收集、后台生成、群组冷却、用户/群组白名单、命令前缀和混合触发模式。
 - 支持仅返回图片 URL、本地保存及 R2 图床保存；参考图上传前可自动清理隐私元数据。
 
-\*[1] 免费无限指生成次数不限，服务可用性视服务器实时资源占用情况而定。已知的 Vertex AI Anonymous 支持的图片生成模型有 `gemini-3.1-flash-lite-image`、 `gemini-3.1-flash-image-preview`、 `gemini-3.1-flash-image`、`gemini-3-pro-image-preview`、`gemini-3-pro-image`、`gemini-2.5-flash-image`。
+\*[1] 免费无限指生成次数不限，服务可用性视服务器实时资源占用情况而定。已知的 Vertex AI Anonymous 支持的图片生成模型有 `gemini-3.1-flash-lite-image`、 `gemini-3.1-flash-image-preview`、 `gemini-3.1-flash-image`、`gemini-3-pro-image`、`gemini-2.5-flash-image`。
 
 ## 常用命令
 

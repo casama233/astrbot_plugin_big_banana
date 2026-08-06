@@ -32,7 +32,8 @@
                 "max_refresh": 5,
                 "max_retry": 5,
                 "retry_delay": 1,
-                "model": "gemini-3-pro-image-preview",
+                "random_fingerprint": false,
+                "model": "gemini-3.1-flash-image",
                 "response_modalities": "['IMAGE']",
                 "enable_proxy": false
             }
@@ -111,11 +112,17 @@
                         "default": 1,
                         "hint": "较大的重试延迟或许可以规避短时间内的集中失败的问题，单位：秒"
                     },
+                    "random_fingerprint": {
+                        "description": "随机指纹",
+                        "type": "bool",
+                        "default": false,
+                        "hint": "随机指纹提高PVP胜率"
+                    },
                     "model": {
                         "description": "模型",
                         "type": "string",
-                        "default": "gemini-3-pro-image-preview",
-                        "hint": "默认 gemini-3-pro-image-preview"
+                        "default": "gemini-3.1-flash-image",
+                        "hint": "模型可用详见 README.md"
                     },
                     "response_modalities": {
                         "description": "响应模式",
