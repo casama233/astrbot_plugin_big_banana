@@ -4,6 +4,12 @@ from typing import TYPE_CHECKING, Any
 
 import astrbot.api.message_components as Comp
 
+from .mention_utils import (
+    QQ_OFFICIAL_MENTION_RE,
+    format_mention,
+    get_qq_official_mention_names,
+)
+
 if TYPE_CHECKING:
     from astrbot.api.event import AstrMessageEvent
 
@@ -121,13 +127,109 @@ def _collect_user_text(
 ) -> str:
     """收集首个文本组件中已去除命令部分的用户文本及其余消息内容。"""
 
-    message_parts = []
+    # 只有 QQ 官方 Bot 才会把用户 @ 保留成 <@ID> 文本；其他平台的普通文本
+    # 不做正则替换，避免误把用户实际输入的相同格式文本改掉。
+    is_qq_official = event.platform_meta.name in {
+        "qq_official",
+        "qq_official_webhook",
+    }
+
+    # 先从原始 mention 对象建立 ID -> 昵称映射。这里不直接使用 message_str：
+    # 官 Bot 的 message_str 可能只保留 <@ID>，而昵称只在原始 mentions 中可用。
+    # 也不在这里逐个调用成员查询接口：该函数是同步的，而且群聊/C2C 不一定有
+    # 通用的成员昵称查询接口；查不到时由后面的 format_mention 回退到 ID。
+    mention_names = get_qq_official_mention_names(event) if is_qq_official else {}
+
+    # 先扫描全部 mention，再开始拼接文本。这样可以在遇到第一个同名用户前
+    # 就知道是否需要追加 ID；如果边扫描边输出，后面发现重名时还要回头修改
+    # 已输出的内容。
+    mention_refs = _collect_mention_refs(event, is_qq_official, mention_names)
+
+    # 用“昵称 -> 不同用户 ID 集合”判断重名，而不是直接统计 mention 次数。
+    # 同一个用户在一句话里重复 @ 不应该被当成重名；只有不同用户共用昵称时，
+    # 才需要生成 @昵称(ID)。
+    users_by_nickname: dict[str, set[str]] = {}
+    for user_id, nickname in mention_refs:
+        if nickname:
+            users_by_nickname.setdefault(nickname, set()).add(user_id)
+    duplicate_nicknames = {
+        nickname
+        for nickname, user_ids in users_by_nickname.items()
+        if len(user_ids) > 1
+    }
+
+    # 按消息组件原有顺序重新组装提示词，避免只读取 message_str 时丢失
+    # 独立的 At 组件。首个 Plain 使用调用方传入的文本，是因为其中可能已经
+    # 去掉了命令/预设名称，不能再直接使用原始 comp.text。
+    message_parts: list[str] = []
     for idx, comp in enumerate(event.get_messages()):
         if idx == first_component_idx:
             if first_component_text:
-                message_parts.append(first_component_text)
+                message_parts.append(
+                    _clean_qq_official_mentions(
+                        first_component_text,
+                        mention_names,
+                        duplicate_nicknames,
+                        is_qq_official,
+                    )
+                )
+        # 官 Bot 的用户 @ 位于 Plain 文本中，需要把 <@ID> 清洗成统一的
+        # @昵称或@ID；其他平台的 Plain 保持原文，避免改变用户真实提示词。
         elif isinstance(comp, Comp.Plain) and comp.text:
-            message_parts.append(comp.text)
+            message_parts.append(
+                _clean_qq_official_mentions(
+                    comp.text,
+                    mention_names,
+                    duplicate_nicknames,
+                    is_qq_official,
+                )
+            )
+        # AstrBot 的 At 组件已经提供 name，优先使用它；没有 name 时由
+        # format_mention 使用 qq。这里不再保留旧的 @昵称(ID) 格式，统一交给
+        # 同名判断决定是否追加 ID。
         elif isinstance(comp, Comp.At) and comp.qq:
-            message_parts.append(f"@{comp.name}({comp.qq})")
+            nickname = comp.name.strip() if comp.name else None
+            message_parts.append(
+                "@" + format_mention(str(comp.qq), nickname, duplicate_nicknames)
+            )
+    # 首尾空格主要来自命令剥离和组件拼接，最终提示词不需要保留它们。
     return " ".join(message_parts).strip()
+
+
+def _collect_mention_refs(
+    event: AstrMessageEvent,
+    is_qq_official: bool,
+    mention_names: dict[str, str],
+) -> list[tuple[str, str | None]]:
+    refs: list[tuple[str, str | None]] = []
+    for comp in event.get_messages():
+        if isinstance(comp, Comp.At) and comp.qq:
+            nickname = comp.name.strip() if comp.name else None
+            refs.append((str(comp.qq), nickname))
+        elif is_qq_official and isinstance(comp, Comp.Plain):
+            refs.extend(
+                (user_id, mention_names.get(user_id))
+                for user_id in QQ_OFFICIAL_MENTION_RE.findall(comp.text)
+            )
+    return refs
+
+
+def _clean_qq_official_mentions(
+    text: str,
+    mention_names: dict[str, str],
+    duplicate_nicknames: set[str],
+    is_qq_official: bool,
+) -> str:
+    if not is_qq_official:
+        return text
+    return QQ_OFFICIAL_MENTION_RE.sub(
+        lambda match: (
+            "@"
+            + format_mention(
+                match.group(1),
+                mention_names.get(match.group(1)),
+                duplicate_nicknames,
+            )
+        ),
+        text,
+    )

@@ -194,6 +194,9 @@ class DrawingCommandHandler:
             else:
                 # 副脑优化
                 prompt = params.get("prompt", "")
+                if not prompt.strip():
+                    prompt = "draw a picture"
+                    params["prompt"] = prompt
                 if prompt and params.get(
                     "sub_brain", self.plugin.sub_brain_config.cmd_enabled
                 ):

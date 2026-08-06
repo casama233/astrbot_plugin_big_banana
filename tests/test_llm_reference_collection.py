@@ -181,7 +181,7 @@ def test_add_msg_images_records_only_the_at_image_position(tmp_path: Path) -> No
     event.message_obj = SimpleNamespace(message_id="message-1")
     event.get_messages = lambda: [
         Comp.Image(None, url="https://example.com/reference.png"),
-        Comp.At(qq="123"),
+        Comp.At(qq="123", name="Alice"),
     ]
     event.get_self_id = lambda: "999"
     event.is_at_or_wake_command = False
@@ -205,7 +205,7 @@ def test_add_msg_images_records_only_the_at_image_position(tmp_path: Path) -> No
         ImageCollector.qq_avatar_url("123"),
     ]
     assert collector.avatar_mappings == {"123": 2}
-    assert collector.image_supplement_infos == ["- @123: avatar is image 2"]
+    assert collector.image_supplement_infos == ["- @Alice: avatar is image 2"]
 
 
 def test_add_msg_images_extracts_qq_official_mentions_from_plain_text(
@@ -213,7 +213,21 @@ def test_add_msg_images_extracts_qq_official_mentions_from_plain_text(
 ) -> None:
     event = build_event("qq_official")
     event.bot = SimpleNamespace(platform=SimpleNamespace(appid="123456"))
-    event.message_obj = SimpleNamespace(message_id="message-1")
+    event.message_obj = SimpleNamespace(
+        message_id="message-1",
+        raw_message=SimpleNamespace(
+            mentions=[
+                SimpleNamespace(
+                    id="B04BC973DCA06850A8CEC05FB08A3F50",
+                    username="Alice",
+                ),
+                SimpleNamespace(
+                    id="65A887A4AF1BE5639DC11C46B052276A",
+                    username="Bob",
+                ),
+            ]
+        ),
+    )
     event.get_messages = lambda: [
         Comp.Plain(
             text=(
@@ -254,6 +268,38 @@ def test_add_msg_images_extracts_qq_official_mentions_from_plain_text(
         "B04BC973DCA06850A8CEC05FB08A3F50": 1,
         "65A887A4AF1BE5639DC11C46B052276A": 2,
     }
+    assert collector.image_supplement_infos == [
+        "- @Alice: avatar is image 1",
+        "- @Bob: avatar is image 2",
+    ]
+
+
+def test_add_msg_images_disambiguates_duplicate_avatar_nicknames(
+    tmp_path: Path,
+) -> None:
+    event = build_event()
+    event.message_obj = SimpleNamespace(message_id="message-1")
+    event.get_messages = lambda: [
+        Comp.At(qq="123", name="Alice"),
+        Comp.At(qq="456", name="Alice"),
+    ]
+    event.get_self_id = lambda: "999"
+    event.is_at_or_wake_command = False
+    plugin = build_plugin(
+        tmp_path,
+        fetched_results=[
+            ImageResource("image/png", b"first-avatar"),
+            ImageResource("image/png", b"second-avatar"),
+        ],
+    )
+    collector = ImageCollector(plugin=plugin, event=event, params={})
+
+    asyncio.run(collector.add_msg_images())
+
+    assert collector.image_supplement_infos == [
+        "- @Alice(123): avatar is image 1",
+        "- @Alice(456): avatar is image 2",
+    ]
 
 
 def test_different_references_with_same_content_are_collected_separately(

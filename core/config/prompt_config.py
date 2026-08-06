@@ -220,6 +220,6 @@ class PromptConfigManager:
             if filtered_line:
                 filtered_lines.append(filtered_line)
 
-        # 归还换行符
-        params["prompt"] = "\n".join(filtered_lines).strip() or "draw a picture"
+        # 归还换行符。空提示词保留为空，由实际提交生成任务的边界统一兜底。
+        params["prompt"] = "\n".join(filtered_lines).strip()
         return params

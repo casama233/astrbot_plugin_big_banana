@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 import re
+from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -11,8 +12,7 @@ from astrbot.api.star import StarTools
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 
 from ..schemas import SUPPORTED_FILE_FORMATS_WITH_DOT
-
-_QQ_OFFICIAL_MENTION_RE = re.compile(r"<@!?([0-9A-Fa-f]{32})>")
+from .mention_utils import QQ_OFFICIAL_MENTION_RE, get_qq_official_mention_names
 
 if TYPE_CHECKING:
     from astrbot.api.event import AstrMessageEvent
@@ -45,6 +45,8 @@ class ImageCollector:
 
         # 将用户 ID 映射到对应头像在 images 中的位置（从 1 开始）。
         self.avatar_mappings: dict[str, int] = {}
+        # 记录头像对应的昵称，用于生成提示词中的头像说明。
+        self.avatar_nicknames: dict[str, str] = {}
         # 图片下载/读取后的缓存对象
         self.images: list[ImageResource] = []
 
@@ -114,7 +116,7 @@ class ImageCollector:
         reply_sender_id = ""
 
         for comp in event.get_messages():
-            avatar_user_ids: list[str] = []
+            avatar_mentions: list[tuple[str, str | None]] = []
             # 引用回复中仅读取图片
             if isinstance(comp, Comp.Reply) and comp.chain:
                 reply_sender_id = str(comp.sender_id)
@@ -138,14 +140,19 @@ class ImageCollector:
                             await self._process_and_add_image(file_ref)
             # 收集@头像
             elif isinstance(comp, Comp.At) and comp.qq:
-                avatar_user_ids = [str(comp.qq)]
-            elif (
-                self.platform_name in {"qq_official", "qq_official_webhook"}
-                and isinstance(comp, Comp.Plain)
-            ):
-                avatar_user_ids = list(
-                    dict.fromkeys(_QQ_OFFICIAL_MENTION_RE.findall(comp.text))
-                )
+                nickname = comp.name.strip() if comp.name else None
+                avatar_mentions = [(str(comp.qq), nickname)]
+            elif self.platform_name in {
+                "qq_official",
+                "qq_official_webhook",
+            } and isinstance(comp, Comp.Plain):
+                mention_names = get_qq_official_mention_names(event)
+                avatar_mentions = [
+                    (user_id, mention_names.get(user_id))
+                    for user_id in dict.fromkeys(
+                        QQ_OFFICIAL_MENTION_RE.findall(comp.text)
+                    )
+                ]
             elif isinstance(comp, Comp.Image):
                 image_ref = self._component_ref(comp, "url", "file", "path")
                 if image_ref:
@@ -164,7 +171,7 @@ class ImageCollector:
             else:
                 continue
 
-            for user_id in avatar_user_ids:
+            for user_id, nickname in avatar_mentions:
                 self_id = event.get_self_id()
                 if not skipped_at_avatar and (
                     # 如果At对象是被引用消息的发送者，跳过一次
@@ -185,7 +192,9 @@ class ImageCollector:
                     if avatar_url:
                         added, _ = await self._process_and_add_image(avatar_url)
                         if added:
-                            self._record_avatar_image(user_id, len(self.images))
+                            self._record_avatar_image(
+                                user_id, len(self.images), nickname
+                            )
 
     async def supplement_avatars(self) -> None:
         """补充可获取的用户头像。"""
@@ -425,16 +434,36 @@ class ImageCollector:
                 return value
         return None
 
-    def _record_avatar_image(self, user_id: str, image_index: int) -> None:
+    def _record_avatar_image(
+        self,
+        user_id: str,
+        image_index: int,
+        nickname: str | None = None,
+    ) -> None:
         """记录用户头像对应的图片位置。"""
         if user_id in self.avatar_mappings:
             return
         self.avatar_mappings[user_id] = image_index
+        if nickname:
+            self.avatar_nicknames[user_id] = nickname
         if self.is_llm_tool:
             return
-        self.image_supplement_infos.append(
-            f"- @{user_id}: avatar is image {image_index}"
-        )
+        self._refresh_avatar_supplement_infos()
+
+    def _refresh_avatar_supplement_infos(self) -> None:
+        nickname_counts = Counter(self.avatar_nicknames.values())
+        duplicate_nicknames = {
+            nickname for nickname, count in nickname_counts.items() if count > 1
+        }
+        self.image_supplement_infos = [
+            (
+                f"- @{nickname}({user_id}): avatar is image {image_index}"
+                if (nickname := self.avatar_nicknames.get(user_id))
+                and nickname in duplicate_nicknames
+                else f"- @{nickname or user_id}: avatar is image {image_index}"
+            )
+            for user_id, image_index in self.avatar_mappings.items()
+        ]
 
     def _record_reference_failure(self, reference: str | Path, reason: str) -> None:
         failure = f"参考图 {reference!s} 处理失败：{reason}"

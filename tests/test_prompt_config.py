@@ -118,6 +118,12 @@ def test_consecutive_valueless_boolean_parameters_preserve_prompt() -> None:
     }
 
 
+def test_empty_prompt_is_preserved_for_later_generation_fallback() -> None:
+    manager = PromptConfigManager({})
+
+    assert manager.parse_prompt_params("") == {"prompt": ""}
+
+
 def test_provider_model_reference_is_preserved_during_prompt_parsing() -> None:
     manager = PromptConfigManager({})
 
