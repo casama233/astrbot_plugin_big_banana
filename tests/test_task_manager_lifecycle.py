@@ -1,6 +1,26 @@
 import asyncio
+from types import SimpleNamespace
 
 from core.drawing.tasks import DrawingTaskManager
+
+
+def test_build_task_id_uses_message_id() -> None:
+    manager = DrawingTaskManager()
+    event = SimpleNamespace(
+        unified_msg_origin="platform:message:session",
+        message_obj=SimpleNamespace(message_id="message-1"),
+    )
+
+    assert manager.build_task_id(event) == "platform:message:session:message-1"
+
+
+def test_build_task_id_falls_back_without_message_obj() -> None:
+    manager = DrawingTaskManager()
+    event = SimpleNamespace(unified_msg_origin="platform:message:session")
+
+    assert manager.build_task_id(event) == (
+        f"platform:message:session:event-{id(event)}"
+    )
 
 
 def test_cancel_all_cancels_tasks_replaced_under_the_same_id() -> None:

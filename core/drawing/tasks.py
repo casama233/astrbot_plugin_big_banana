@@ -26,7 +26,14 @@ class DrawingTaskManager:
         Returns:
             可在不同平台和会话之间安全区分的任务键。
         """
-        return f"{event.unified_msg_origin}:{event.message_obj.message_id}"
+        message_obj = getattr(event, "message_obj", None)
+        message_id = getattr(message_obj, "message_id", None)
+        if message_id is None:
+            # LLM 工具调用等场景可能只有虚拟事件，没有对应的原始消息对象。
+            # 使用事件对象身份作为回退值，既避免属性错误，也不会让同一会话中的
+            # 不同事件共用同一个任务 ID。
+            message_id = f"event-{id(event)}"
+        return f"{event.unified_msg_origin}:{message_id}"
 
     def is_running(self, task_id: str) -> bool:
         """判断指定会话是否已有未完成的绘图任务。"""
