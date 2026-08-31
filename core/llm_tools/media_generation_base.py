@@ -57,8 +57,15 @@ class BaseMediaGenerationTool(FunctionTool[AstrAgentContext], ABC):
             )
 
         current_task = asyncio.current_task()
-        if current_task:
-            plugin.task_manager.start(task_id, current_task)
+        if current_task is None:
+            return "无法登记当前生成任务，请稍后再试。"
+        session_error = plugin.task_manager.begin_session_generation(
+            unified_msg_origin,
+            current_task,
+        )
+        if session_error:
+            return session_error
+        plugin.task_manager.start(task_id, current_task)
 
         try:
             direct_send_result = plugin.llm_tools_config.llm_tool_direct_send_result
@@ -96,6 +103,11 @@ class BaseMediaGenerationTool(FunctionTool[AstrAgentContext], ABC):
                 )
                 plugin.task_manager.start(task_id, task)
                 plugin.task_manager.start_llm_task(unified_msg_origin, task)
+                plugin.task_manager.transfer_session_generation(
+                    unified_msg_origin,
+                    current_task,
+                    task,
+                )
                 if not use_background_callback:
                     return (
                         f"后台{self.generation_name}任务已启动，完成后会直接把"
@@ -126,6 +138,10 @@ class BaseMediaGenerationTool(FunctionTool[AstrAgentContext], ABC):
         finally:
             if plugin.task_manager.running_tasks.get(task_id) is current_task:
                 plugin.task_manager.finish(task_id)
+            plugin.task_manager.finish_session_generation(
+                unified_msg_origin,
+                current_task,
+            )
 
     async def _generate_and_send_result(
         self,
@@ -176,6 +192,10 @@ class BaseMediaGenerationTool(FunctionTool[AstrAgentContext], ABC):
         finally:
             if is_background_task:
                 plugin.task_manager.finish(plugin.task_manager.build_task_id(event))
+                plugin.task_manager.finish_session_generation(
+                    unified_msg_origin,
+                    asyncio.current_task(),
+                )
             if event.platform_meta.name == "telegram":
                 for path in temporary_paths:
                     try:
@@ -226,6 +246,16 @@ class BaseMediaGenerationTool(FunctionTool[AstrAgentContext], ABC):
                 f"[BIG BANANA] {self.generation_name}结果发送失败: {exc}",
                 exc_info=True,
             )
+            if not result.error_message:
+                plugin.task_manager.mark_send_unknown(
+                    event.unified_msg_origin,
+                    plugin.llm_tools_config.send_unknown_cooldown_seconds,
+                )
+                return (
+                    f"{self.media_name}已经生成，但平台发送回执状态未知。"
+                    "为避免重复图片，当前会话已禁止短期内再次生成；"
+                    f"请告知用户发送状态未知，切勿再次调用{self.generation_name}工具。"
+                )
             return (
                 f"{self.generation_name}结果发送失败。请告知用户发送失败，"
                 f"并根据当前结果决定是否重试；不要声称{self.media_name}已经发送成功。"
@@ -255,7 +285,6 @@ class BaseMediaGenerationTool(FunctionTool[AstrAgentContext], ABC):
             params=params,
             is_llm_tool=True,
         )
-        # 提示词或全局默认参数中的固定参考图对 LLM 工具同样生效。
         await collector.add_refer_images()
         if image_references:
             await collector.add_explicit_references(image_references)
