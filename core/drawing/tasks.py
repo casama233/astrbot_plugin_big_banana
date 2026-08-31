@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,6 +19,8 @@ class DrawingTaskManager:
         self.running_tasks: dict[str, asyncio.Task] = {}
         self._tracked_tasks: set[asyncio.Task] = set()
         self.session_llm_tasks: dict[str, set[asyncio.Task]] = {}
+        self.session_generation_tasks: dict[str, asyncio.Task] = {}
+        self.send_unknown_until: dict[str, float] = {}
 
     @staticmethod
     def build_task_id(event: AstrMessageEvent) -> str:
@@ -66,6 +69,7 @@ class DrawingTaskManager:
         if len(running) != len(tasks):
             self.session_llm_tasks[session_id] = set(running)
         return len(running)
+
     def start_llm_task(self, session_id: str, task: asyncio.Task) -> None:
         """登记指定会话的 LLM 工具后台任务。"""
         if session_id not in self.session_llm_tasks:
@@ -82,6 +86,56 @@ class DrawingTaskManager:
             if not tasks:
                 self.session_llm_tasks.pop(session_id, None)
 
+    def begin_session_generation(
+        self,
+        session_id: str,
+        task: asyncio.Task,
+    ) -> str | None:
+        """为完整的生成与发送阶段预留一个会话级任务槽。"""
+        now = time.monotonic()
+        unknown_until = self.send_unknown_until.get(session_id, 0.0)
+        if unknown_until > now:
+            remaining = max(1, int(unknown_until - now + 0.999))
+            return (
+                "上一张图片已经生成，但发送回执状态未知。"
+                f"为避免重复出图，当前会话将在约 {remaining} 秒内禁止再次生成；"
+                "请勿再次调用生成工具。"
+            )
+        self.send_unknown_until.pop(session_id, None)
+
+        active = self.session_generation_tasks.get(session_id)
+        if active is not None and active is not task and not active.done():
+            return (
+                "当前会话已有图片或视频生成任务，需等待其生成和发送阶段结束；"
+                "请勿重复调用生成工具。"
+            )
+        self.session_generation_tasks[session_id] = task
+        return None
+
+    def transfer_session_generation(
+        self,
+        session_id: str,
+        old_task: asyncio.Task,
+        new_task: asyncio.Task,
+    ) -> None:
+        """将前台任务的会话预留转移给其创建的后台任务。"""
+        if self.session_generation_tasks.get(session_id) is old_task:
+            self.session_generation_tasks[session_id] = new_task
+
+    def finish_session_generation(
+        self,
+        session_id: str,
+        task: asyncio.Task | None,
+    ) -> None:
+        """仅由当前持有者释放会话级生成槽。"""
+        if task is not None and self.session_generation_tasks.get(session_id) is task:
+            self.session_generation_tasks.pop(session_id, None)
+
+    def mark_send_unknown(self, session_id: str, cooldown_seconds: int) -> None:
+        """标记发送回执未知，并以 10—600 秒的有界窗口防止重复出图。"""
+        cooldown = min(600, max(10, int(cooldown_seconds)))
+        self.send_unknown_until[session_id] = time.monotonic() + cooldown
+
     async def cancel_all(self) -> None:
         """取消并等待所有登记过且尚未结束的绘图任务。"""
         current_task = asyncio.current_task()
@@ -97,3 +151,5 @@ class DrawingTaskManager:
         self.running_tasks.clear()
         self._tracked_tasks.clear()
         self.session_llm_tasks.clear()
+        self.session_generation_tasks.clear()
+        self.send_unknown_until.clear()
