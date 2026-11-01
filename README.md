@@ -179,3 +179,11 @@ async def on_media_generation_complete(
 ## 致谢
 
 感谢所有贡献者与测试用户，以及 Codex 和 Antigravity 的编程辅助！
+
+## 上游來源與授權
+
+The repository is a fork of the upstream project. The upstream MIT copyright notice for sukafon is retained in LICENSE. Changes in this fork do not remove upstream attribution.
+
+- 上游專案：[sukafon/astrbot_plugin_big_banana](https://github.com/sukafon/astrbot_plugin_big_banana)
+- 上游授權狀態：MIT
+- 本倉庫保留上游來源脈絡；請勿將本倉庫的新增修改誤認為上游作者的作品，也勿將本倉庫授權擴張到第三方素材、資料或依賴。
