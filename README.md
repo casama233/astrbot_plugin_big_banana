@@ -2,6 +2,8 @@
 
 # 🍌 大香蕉 图片/视频生成插件 🍌
 
+**简体中文** · [繁體中文](README.zh-TW.md) · [English](README.en.md)
+
 ![:访问量](https://count.getloli.com/@astrbot_plugin_big_banana?name=astrbot_plugin_big_banana&theme=rule34&padding=5&offset=0&scale=1&pixelated=1&darkmode=auto)
 
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
